@@ -1,0 +1,33 @@
+# BB Files
+
+A standalone BB plugin that adds **Actions → Files** to every thread. The panel is bound to that thread's live environment and uses `bb.sdk.files`, so the same tree/editor works on the local machine and connected hosts.
+
+## Features
+
+- bounded recursive tree and fuzzy file search;
+- UTF-8 editing up to 2 MiB with CodeMirror 6;
+- BB-native Markdown **Preview** plus editable **Raw** mode;
+- 700 ms autosave, Save, and Cmd/Ctrl+S;
+- SHA-based compare-and-swap with explicit Reload/Overwrite conflict handling;
+- 10-second tree/file external-change polling;
+- create, rename, duplicate, recursive delete, and copy-relative-path actions;
+- narrow panel navigation with a Back control;
+- hidden paths, symlinks, and `node_modules` remain excluded by BB's host lister.
+
+## Development
+
+```bash
+npm install --legacy-peer-deps
+npm run typecheck
+npm test
+bb plugin build .
+bb plugin install "$PWD" --yes
+```
+
+Then open a thread and choose **New tab → Actions → Files** in its right panel. During development, run `bb plugin dev "$PWD"`.
+
+## Safety model
+
+The frontend sends only `threadId` and project-relative paths. Every RPC resolves the thread environment again. Reads and mutations are confined with `hostId` and `rootPath`; `listPaths` receives the resolved absolute root because that SDK method has no `rootPath` field. Existing-file writes use their last-read SHA. New files use create-only writes. Folder duplication preflights at 501 entries and refuses more than 500.
+
+Binary and oversized files are metadata-only. There is no fallback to the primary machine when the thread environment is unavailable.
