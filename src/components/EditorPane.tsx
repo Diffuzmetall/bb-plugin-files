@@ -53,6 +53,8 @@ export function EditorPane({
   onReload,
   onSave,
   onDownload,
+  onToggleSidebar,
+  isSidebarOpen,
   getDownloadUrl,
   saveState,
 }: {
@@ -67,6 +69,8 @@ export function EditorPane({
   onReload(): void;
   onSave(): void;
   onDownload(): void;
+  onToggleSidebar?(): void;
+  isSidebarOpen?: boolean;
   getDownloadUrl(path: string): Promise<string>;
   saveState: SaveState;
 }) {
@@ -122,6 +126,16 @@ export function EditorPane({
             onClick={onBack}
           >
             <Icon name="ChevronLeft" />
+          </Button>
+        ) : onToggleSidebar ? (
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-8 w-8"
+            aria-label={isSidebarOpen ? "Hide sidebar" : "Show sidebar"}
+            onClick={onToggleSidebar}
+          >
+            <Icon name="PanelLeft" />
           </Button>
         ) : null}
         <Icon name="File" className="h-4 w-4 text-muted-foreground" aria-hidden />
