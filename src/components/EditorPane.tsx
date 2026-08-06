@@ -96,101 +96,103 @@ export function EditorPane({
     return () => void (cancelled = true);
   }, [file?.path, isImage, getDownloadUrl]);
 
-  if (fileLoading && file === null) {
-    return (
-      <div className="grid h-full place-items-center text-sm text-muted-foreground" role="status">
-        Loading file…
-      </div>
-    );
-  }
-  if (file === null) {
-    return (
-      <div className="grid h-full place-items-center p-6 text-center text-sm text-muted-foreground">
-        <div>
-          <Icon name="File" className="mx-auto mb-3 h-8 w-8" aria-hidden />
-          Select a file from the project tree.
-        </div>
-      </div>
-    );
-  }
-
   return (
     <section className="flex h-full min-h-0 min-w-0 flex-col bg-background">
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border-seam px-2">
-        {narrow ? (
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-8 w-8"
-            aria-label="Back to files"
-            onClick={onBack}
-          >
-            <Icon name="ChevronLeft" />
-          </Button>
-        ) : onToggleSidebar ? (
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-8 w-8"
-            aria-label={isSidebarOpen ? "Hide sidebar" : "Show sidebar"}
-            onClick={onToggleSidebar}
-          >
-            <Icon name="PanelLeft" />
-          </Button>
+      {/* TAB BAR */}
+      <div className="flex h-9 shrink-0 items-end bg-muted/30 border-b border-border-seam pr-2 pl-0 relative">
+        {!isSidebarOpen && onToggleSidebar ? (
+          <div className="flex h-full items-center px-2">
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+              aria-label="Show sidebar"
+              onClick={onToggleSidebar}
+            >
+              <Icon name="PanelLeft" className="h-4 w-4" />
+            </Button>
+          </div>
         ) : null}
-        <Icon name="File" className="h-4 w-4 text-muted-foreground" aria-hidden />
-        <span className="min-w-0 flex-1 truncate text-sm font-medium">
-          {file.path}
-        </span>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="h-8 w-8"
-          aria-label="Download file"
-          onClick={onDownload}
-        >
-          <Icon name="Download" />
-        </Button>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="h-8 w-8"
-          aria-label={copied ? "Copied" : "Copy file content"}
-          disabled={file.state !== "text"}
-          onClick={async () => {
-            if (file.state !== "text") return;
-            try {
-              await navigator.clipboard.writeText(draftText);
-              setCopied(true);
-              window.setTimeout(() => setCopied(false), 1200);
-            } catch {
-              /* clipboard unavailable */
-            }
-          }}
-        >
-          <Icon name={copied ? "Check" : "Copy"} />
-        </Button>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="h-8 w-8"
-          aria-label="Reload file"
-          onClick={onReload}
-        >
-          <Icon name="RotateCcw" />
-        </Button>
-        {file.state === "text" ? (
-          <SaveLabel state={saveState} dirty={isDirty} />
+
+        {file !== null ? (
+          <div className="group relative flex h-[35px] max-w-[200px] shrink-0 items-center gap-2 border-r border-t border-border-seam bg-background px-3 text-[13px] text-foreground transition-colors after:absolute after:left-0 after:top-0 after:h-[2px] after:w-full after:bg-primary">
+            <span className="min-w-0 flex-1 truncate select-none">
+              {file.path.split("/").pop()}
+            </span>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onBack();
+              }}
+              className="grid h-[18px] w-[18px] shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+              aria-label="Close file"
+            >
+              {isDirty ? (
+                <div className="h-2 w-2 rounded-full bg-foreground opacity-100" />
+              ) : (
+                <Icon name="X" className="h-[14px] w-[14px]" />
+              )}
+            </button>
+            {/* Always show dirty dot when not hovered */}
+            {isDirty && (
+              <div className="absolute right-3.5 h-2 w-2 rounded-full bg-foreground opacity-100 group-hover:opacity-0 transition-opacity pointer-events-none" />
+            )}
+          </div>
+        ) : null}
+
+        <div className="flex-1" />
+
+        {file !== null ? (
+          <div className="flex h-full items-center gap-1 pb-1">
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-6 w-6 text-muted-foreground hover:text-foreground"
+              aria-label="Download file"
+              onClick={onDownload}
+            >
+              <Icon name="Download" className="h-4 w-4" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-6 w-6 text-muted-foreground hover:text-foreground"
+              aria-label={copied ? "Copied" : "Copy file content"}
+              disabled={file.state !== "text"}
+              onClick={async () => {
+                if (file.state !== "text") return;
+                try {
+                  await navigator.clipboard.writeText(draftText);
+                  setCopied(true);
+                  window.setTimeout(() => setCopied(false), 1200);
+                } catch {
+                  /* clipboard unavailable */
+                }
+              }}
+            >
+              <Icon name={copied ? "Check" : "Copy"} className="h-4 w-4" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-6 w-6 text-muted-foreground hover:text-foreground"
+              aria-label="Reload file"
+              onClick={onReload}
+            >
+              <Icon name="RotateCcw" className="h-4 w-4" />
+            </Button>
+          </div>
         ) : null}
       </div>
 
-      {markdown && file.state === "text" ? (
-        <div className="flex h-10 shrink-0 items-center justify-end border-b border-border-seam px-2">
+      {/* BREADCRUMB / ACTIONS (Optional secondary bar, for Markdown toggle) */}
+      {file !== null && markdown && file.state === "text" ? (
+        <div className="flex h-9 shrink-0 items-center justify-end border-b border-border-seam px-2 bg-background">
           <div className="flex rounded-md border border-input p-0.5" role="group" aria-label="Markdown view">
             <Button
               size="sm"
               variant={mode === "preview" ? "secondary" : "ghost"}
-              className="h-7 px-3"
+              className="h-6 px-3 text-xs"
               aria-pressed={mode === "preview"}
               onClick={() => setMode("preview")}
             >
@@ -199,7 +201,7 @@ export function EditorPane({
             <Button
               size="sm"
               variant={mode === "raw" ? "secondary" : "ghost"}
-              className="h-7 px-3"
+              className="h-6 px-3 text-xs"
               aria-pressed={mode === "raw"}
               onClick={() => setMode("raw")}
             >
@@ -209,67 +211,92 @@ export function EditorPane({
         </div>
       ) : null}
 
-      {saveState.kind === "conflict" ? (
-        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-surface-destructive-border bg-surface-destructive px-3 py-2 text-xs text-destructive-text" role="alert">
-          The file changed outside this editor. Your draft is preserved.
-          <Button size="sm" variant="outline" className="ml-auto h-7" onClick={onReload}>
-            Reload
-          </Button>
-          <Button size="sm" variant="destructive" className="h-7" onClick={onOverwrite}>
-            Overwrite
-          </Button>
+      {/* MAIN CONTENT AREA */}
+      {fileLoading && file === null ? (
+        <div className="grid h-full place-items-center text-sm text-muted-foreground" role="status">
+          Loading file…
         </div>
-      ) : saveState.kind === "error" ? (
-        <div className="flex shrink-0 items-center gap-2 border-b border-surface-destructive-border bg-surface-destructive px-3 py-2 text-xs text-destructive-text" role="alert">
-          {saveState.message}
-          <Button size="sm" variant="outline" className="ml-auto h-7" onClick={onSave}>
-            Retry
-          </Button>
+      ) : file === null ? (
+        <div className="grid h-full place-items-center p-6 text-center text-sm text-muted-foreground bg-background">
+          <div className="opacity-50 select-none">
+            <Icon name="Code" className="mx-auto mb-4 h-16 w-16 stroke-[1px]" aria-hidden />
+            <p className="font-medium text-base tracking-tight">BB Files Editor</p>
+            <p className="mt-1 text-xs">Select a file from the explorer to begin.</p>
+          </div>
         </div>
-      ) : null}
+      ) : (
+        <>
+          {saveState.kind === "conflict" ? (
+            <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-surface-destructive-border bg-surface-destructive px-3 py-2 text-xs text-destructive-text" role="alert">
+              The file changed outside this editor. Your draft is preserved.
+              <Button size="sm" variant="outline" className="ml-auto h-6 text-xs" onClick={onReload}>
+                Reload
+              </Button>
+              <Button size="sm" variant="destructive" className="h-6 text-xs" onClick={onOverwrite}>
+                Overwrite
+              </Button>
+            </div>
+          ) : saveState.kind === "error" ? (
+            <div className="flex shrink-0 items-center gap-2 border-b border-surface-destructive-border bg-surface-destructive px-3 py-2 text-xs text-destructive-text" role="alert">
+              {saveState.message}
+              <Button size="sm" variant="outline" className="ml-auto h-6 text-xs" onClick={onSave}>
+                Retry
+              </Button>
+            </div>
+          ) : null}
 
-      <div className="min-h-0 flex-1 overflow-hidden">
-        {isImage ? (
-          <div className="grid h-full place-items-center bg-muted/20 p-6">
-            {imageUrl ? (
-              <img 
-                src={imageUrl} 
-                alt={file.path} 
-                className="max-h-full max-w-full rounded-md object-contain shadow-sm"
-              />
+          <div className="min-h-0 flex-1 overflow-hidden relative">
+            {isImage ? (
+              <div className="grid h-full place-items-center bg-[var(--canvas)] p-6 checkerboard-bg">
+                {imageUrl ? (
+                  <img 
+                    src={imageUrl} 
+                    alt={file.path} 
+                    className="max-h-full max-w-full object-contain drop-shadow-md"
+                  />
+                ) : (
+                  <p className="text-sm text-muted-foreground">Loading image preview…</p>
+                )}
+              </div>
+            ) : file.state === "unsupported" ? (
+              <div className="grid h-full place-items-center p-6 text-center bg-background">
+                <div className="max-w-sm">
+                  <Icon name="FileQuestion" className="mx-auto mb-3 h-10 w-10 text-muted-foreground opacity-50" aria-hidden />
+                  <p className="text-sm font-medium text-foreground">
+                    {file.reason === "binary" ? "Binary file" : "File is too large"}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {formatBytes(file.sizeBytes)} · This file is available as metadata only and cannot be edited here.
+                  </p>
+                </div>
+              </div>
+            ) : markdown && mode === "preview" ? (
+              <div className="h-full overflow-y-auto p-6 bg-background">
+                <Markdown content={draftText} />
+              </div>
             ) : (
-              <p className="text-sm text-muted-foreground">Loading image preview…</p>
+              <CodeEditor
+                filePath={file.path}
+                value={draftText}
+                onChange={onChange}
+                onSave={onSave}
+              />
             )}
           </div>
-        ) : file.state === "unsupported" ? (
-          <div className="grid h-full place-items-center p-6 text-center">
-            <div className="max-w-sm">
-              <Icon name="FileQuestion" className="mx-auto mb-3 h-8 w-8 text-muted-foreground" aria-hidden />
-              <p className="text-sm font-medium">
-                {file.reason === "binary" ? "Binary file" : "File is too large"}
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {formatBytes(file.sizeBytes)} · This file is available as metadata only and cannot be edited here.
-              </p>
+          <div className="flex h-6 shrink-0 items-center justify-between border-t border-border-seam bg-muted/10 px-3 text-[11px] text-muted-foreground select-none">
+            <div className="flex items-center gap-3">
+              {file.state === "text" ? (
+                <span className="flex items-center gap-1.5">
+                  <div className={`h-1.5 w-1.5 rounded-full ${isDirty ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+                  {isDirty ? 'Unsaved' : 'Saved'}
+                </span>
+              ) : null}
+              <span>{file.state === "text" ? "UTF-8" : file.reason === "binary" ? "Binary" : "Unsupported"}</span>
             </div>
+            <span>{formatBytes(file.sizeBytes)}</span>
           </div>
-        ) : markdown && mode === "preview" ? (
-          <div className="h-full overflow-y-auto p-5">
-            <Markdown content={draftText} />
-          </div>
-        ) : (
-          <CodeEditor
-            filePath={file.path}
-            value={draftText}
-            onChange={onChange}
-            onSave={onSave}
-          />
-        )}
-      </div>
-      <div className="flex h-7 shrink-0 items-center justify-between border-t border-border-seam px-3 text-xs text-muted-foreground">
-        <span>{file.state === "text" ? "UTF-8" : file.reason === "binary" ? "Binary" : "Unsupported"}</span>
-        <span>{formatBytes(file.sizeBytes)}</span>
-      </div>
+        </>
+      )}
     </section>
   );
 }
