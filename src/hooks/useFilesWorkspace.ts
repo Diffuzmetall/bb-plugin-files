@@ -354,11 +354,38 @@ export function useFilesWorkspace(threadId: string) {
     [rpc, runMutation, threadId],
   );
 
+  const getDownloadUrl = useCallback(
+    async (path: string) => {
+      const result = await rpc.call("getDownloadUrl", { threadId, path });
+      return result.url;
+    },
+    [rpc, threadId]
+  );
+
+  const downloadPath = useCallback(
+    async (path: string) => {
+      try {
+        const url = await getDownloadUrl(path);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = path.split("/").pop() || "download";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      } catch (error) {
+        setSaveState({ kind: "error", message: message(error) });
+      }
+    },
+    [getDownloadUrl]
+  );
+
   return useMemo(
     () => ({
       closeFile,
       createDirectory,
       createFile,
+      downloadPath,
+      getDownloadUrl,
       draftText,
       duplicatePath,
       entries,
@@ -386,6 +413,8 @@ export function useFilesWorkspace(threadId: string) {
       closeFile,
       createDirectory,
       createFile,
+      downloadPath,
+      getDownloadUrl,
       draftText,
       duplicatePath,
       entries,

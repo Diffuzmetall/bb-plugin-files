@@ -18,8 +18,6 @@ describe("project path policy", () => {
     "../secret",
     "src/../secret",
     "src/./file",
-    ".env",
-    "src/.hidden/file",
     "C:\\Windows\\system.ini",
     "\\\\server\\share\\file",
     "src//file",

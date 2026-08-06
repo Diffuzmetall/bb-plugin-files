@@ -279,5 +279,21 @@ export function createFileService(bb: BbPluginApi) {
         ? duplicateFile(args)
         : duplicateDirectory(args);
     },
+
+    async getDownloadUrl({ threadId, path }: { threadId: string; path: string }) {
+      const environment = await target(threadId);
+      const resolved = resolveProjectPath(environment.rootPath, path, {
+        allowEmpty: false,
+      });
+      const preview = await bb.sdk.files.createPreview({
+        hostId: environment.hostId,
+        rootPath: environment.rootPath,
+      });
+      const encodedPath = resolved.relativePath
+        .split("/")
+        .map(encodeURIComponent)
+        .join("/");
+      return { url: `${preview.baseUrl}/${encodedPath}` };
+    },
   };
 }

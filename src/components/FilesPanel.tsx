@@ -61,6 +61,10 @@ export function FilesPanel({ threadId }: PluginThreadPanelProps) {
       void navigator.clipboard.writeText(entry.path);
       return;
     }
+    if (action === "download") {
+      void workspace.downloadPath(entry.path);
+      return;
+    }
     if (action === "delete") {
       setDeleteError(null);
       setDeleteEntry(entry);
@@ -106,6 +110,8 @@ export function FilesPanel({ threadId }: PluginThreadPanelProps) {
       onOverwrite={() => void workspace.overwrite()}
       onReload={() => void workspace.reloadFile()}
       onSave={() => void workspace.save()}
+      onDownload={() => workspace.selectedPath && void workspace.downloadPath(workspace.selectedPath)}
+      getDownloadUrl={workspace.getDownloadUrl}
       saveState={workspace.saveState}
     />
   );
