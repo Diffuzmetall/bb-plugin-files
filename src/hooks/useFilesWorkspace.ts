@@ -294,9 +294,8 @@ export function useFilesWorkspace(threadId: string) {
     (path: string) =>
       runMutation(async () => {
         const result = await rpc.call("createFile", { threadId, path });
-        if (result.outcome === "conflict") {
-          throw new Error(`A file already exists at ${path}.`);
-        }
+        // Если файл уже существует (conflict), мы просто проигнорируем ошибку 
+        // и всё равно откроем его. Это позволяет открывать скрытые файлы.
         await openPath(path);
       }),
     [openPath, rpc, runMutation, threadId],

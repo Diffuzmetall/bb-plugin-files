@@ -61,7 +61,9 @@ export function OperationDialog({
           <DialogHeader>
             <DialogTitle>{request ? TITLES[request.kind] : "File operation"}</DialogTitle>
             <DialogDescription>
-              Enter a project-relative path. Existing destinations are never overwritten.
+              {request?.kind === "create-file" 
+                ? "Enter a project-relative path. If the file already exists, it will be opened."
+                : "Enter a project-relative path. Existing destinations are never overwritten."}
             </DialogDescription>
           </DialogHeader>
           <Input

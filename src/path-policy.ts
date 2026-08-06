@@ -42,9 +42,6 @@ export function parseRelativePath(
     if (segment === "." || segment === "..") {
       throw new Error("Path must not contain dot or traversal segments.");
     }
-    if (segment.startsWith(".")) {
-      throw new Error("Hidden paths are not supported by Files.");
-    }
     if (segment.includes("\0")) {
       throw new Error("Path must not contain NUL bytes.");
     }

@@ -51,6 +51,73 @@ export function createFileService(bb: BbPluginApi) {
           positions: entry.positions,
         };
       });
+
+      if (query.length === 0) {
+        const probes = [
+          ".gitignore", ".env", ".env.local", ".env.development", ".env.production",
+          ".pi", ".github", ".vscode", ".cursorrules", ".cursorignore",
+          ".npmrc", ".nvmrc", ".yarnrc",
+          ".dockerignore", ".editorconfig",
+          ".prettierrc", ".eslintrc", ".eslintrc.json", ".eslintrc.js"
+        ];
+        await Promise.all(
+          probes.map(async (name) => {
+            try {
+              const resolved = resolveProjectPath(environment.rootPath, name, { allowEmpty: false });
+              try {
+                // Try reading as file
+                await bb.sdk.files.read({
+                  hostId: environment.hostId,
+                  rootPath: environment.rootPath,
+                  path: resolved.absolutePath,
+                });
+                entries.push({
+                  kind: "file",
+                  path: name,
+                  name: name,
+                  score: 0,
+                  positions: [],
+                });
+              } catch (e: any) {
+                // If it's a 404, it doesn't exist
+                const errorStr = String(e?.message || e);
+                if (errorStr.includes("404") || errorStr.includes("not exist") || errorStr.includes("path_not_found")) {
+                  return; // Skip, it really doesn't exist
+                }
+                
+                // If it failed but it's not a 404, it might be a directory
+                const dirResult = await bb.sdk.files.listPaths({
+                  hostId: environment.hostId,
+                  path: resolved.absolutePath,
+                  includeFiles: true,
+                  includeDirectories: true,
+                  limit: 1000,
+                });
+                entries.push({
+                  kind: "directory",
+                  path: name,
+                  name: name,
+                  score: 0,
+                  positions: [],
+                });
+                for (const child of dirResult.paths) {
+                  const childPath = name + "/" + child.path;
+                  entries.push({
+                    kind: child.kind,
+                    path: childPath,
+                    name: child.name,
+                    score: 0,
+                    positions: [],
+                  });
+                }
+              }
+            } catch {
+              // Item does not exist, ignore
+            }
+          })
+        );
+      }
+
       return {
         rootName: projectBasename(environment.rootPath),
         entries,
