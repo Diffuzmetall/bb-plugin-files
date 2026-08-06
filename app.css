@@ -1,0 +1,22 @@
+.bb-files-panel .cm-editor,
+.bb-files-panel .cm-scroller {
+  height: 100%;
+}
+
+.bb-files-panel .cm-scroller {
+  overflow: auto;
+}
+
+.bb-files-panel .cm-search {
+  border-bottom: 1px solid var(--border-seam);
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.bb-files-panel .cm-textfield,
+.bb-files-panel .cm-button {
+  border: 1px solid var(--input);
+  border-radius: calc(var(--radius) - 2px);
+  background: transparent;
+  color: var(--foreground);
+}
