@@ -4,14 +4,14 @@ A standalone BB plugin that adds **Actions → Files** to every thread. The pane
 
 ## Features
 
-- **Multi-Tab Editor**: Open multiple files simultaneously with a modern tab bar. Seamlessly switch between files while each tab preserves its own draft state, autosave timers, and scroll position;
+- **Multi-Tab Editor**: open multiple files simultaneously with a modern tab bar. Each tab preserves its own draft, save state, and autosave flow;
 - **Resizable Layout**: Modern IDE-style interface with the editor on the left and a resizable, collapsible file tree on the right;
 - bounded recursive tree (up to 10,000 files) with fuzzy file search;
 - **Depth-first tree rendering**: accurately reconstructs project hierarchy with auto-expansion of active file paths;
 - **Hidden files support**: dynamically probes and reveals common configuration dotfiles (e.g. `.env`, `.gitignore`, `.github`, `.vscode`, etc.) which are normally excluded by the host lister;
 - UTF-8 editing up to 2 MiB with CodeMirror 6;
-- BB-native Markdown **Preview**, editable **Raw** mode, and **Image Previews** (inline rendering for image files);
-- 700 ms autosave, Save, and Cmd/Ctrl+S;
+- BB-native Markdown **Preview**, editable **Raw** mode, **Image Previews**, and HTML previews in an inline iframe or separate browser tab;
+- 700 ms autosave and Cmd/Ctrl+S;
 - SHA-based compare-and-swap with explicit Reload/Overwrite conflict handling;
 - 10-second tree/file external-change polling;
 - create, rename (safely preserves unsaved drafts), duplicate, recursive delete, copy file content, copy relative path, and **download** actions;
