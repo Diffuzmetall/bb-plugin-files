@@ -1,6 +1,6 @@
 # BB Files
 
-A standalone BB plugin that adds **Actions → Files** to every thread. The panel is bound to that thread's live environment and uses `bb.sdk.files`, so the same tree/editor works on the local machine and connected hosts.
+A standalone BB plugin that adds **Actions → Files** to every thread. The panel is bound to that thread's live environment and uses `bb.sdk.files`, so the same tree/editor works on the local machine and connected hosts. 
 
 ## Features
 

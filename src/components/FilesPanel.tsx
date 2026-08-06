@@ -60,7 +60,8 @@ export function FilesPanel({ threadId }: PluginThreadPanelProps) {
     if (!isResizing.current) return;
     const containerRect = containerNode?.getBoundingClientRect();
     if (containerRect) {
-      let newWidth = e.clientX - containerRect.left;
+      // Since tree is on the right, width is right edge minus mouse X
+      let newWidth = containerRect.right - e.clientX;
       if (newWidth < 100) {
         setIsSidebarOpen(false);
         isResizing.current = false;
@@ -125,45 +126,38 @@ export function FilesPanel({ threadId }: PluginThreadPanelProps) {
       onRefresh={() => void workspace.refreshTree()}
       query={workspace.query}
       rootName={workspace.rootName}
-      selectedPath={workspace.selectedPath}
+      selectedPath={workspace.activePath}
       setQuery={workspace.setQuery}
       truncated={workspace.truncated}
     />
   );
   const editor = (
     <EditorPane
-      draftText={workspace.draftText}
-      file={workspace.openFile}
-      fileLoading={workspace.fileLoading}
-      isDirty={workspace.isDirty}
+      tabs={workspace.tabs}
+      activePath={workspace.activePath}
       narrow={isNarrow}
-      onBack={() => void workspace.closeFile()}
+      onTabSelect={workspace.setActivePath}
+      onTabClose={(path) => void workspace.closeFile(path)}
       onChange={workspace.setDraftText}
-      onOverwrite={() => void workspace.overwrite()}
-      onReload={() => void workspace.reloadFile()}
-      onSave={() => void workspace.save()}
-      onDownload={() => workspace.selectedPath && void workspace.downloadPath(workspace.selectedPath)}
+      onOverwrite={(path) => void workspace.overwrite(path)}
+      onReload={(path) => void workspace.reloadFile(path)}
+      onSave={(path) => void workspace.save(path)}
+      onDownload={(path) => void workspace.downloadPath(path)}
       onToggleSidebar={() => setIsSidebarOpen((prev) => !prev)}
       isSidebarOpen={isSidebarOpen}
       getDownloadUrl={workspace.getDownloadUrl}
-      saveState={workspace.saveState}
     />
   );
 
   return (
     <div ref={containerRef} className="bb-files-panel relative flex h-full min-h-0 min-w-0 overflow-hidden bg-background text-foreground">
       {isNarrow ? (
-        workspace.selectedPath === null ? tree : editor
+        workspace.activePath === null ? tree : editor
       ) : (
         <>
+          <div className="h-full min-w-0 flex-1">{editor}</div>
           {isSidebarOpen && (
             <>
-              <div 
-                className="h-full shrink-0" 
-                style={{ width: `${sidebarWidth}px`, minWidth: '150px' }}
-              >
-                {tree}
-              </div>
               <div
                 className="w-1 cursor-col-resize hover:bg-state-hover active:bg-state-active bg-border-seam shrink-0 transition-colors z-10"
                 onPointerDown={startResizing}
@@ -171,9 +165,14 @@ export function FilesPanel({ threadId }: PluginThreadPanelProps) {
                 onPointerUp={onPointerUp}
                 onPointerCancel={onPointerUp}
               />
+              <div 
+                className="h-full shrink-0 border-l border-border-seam" 
+                style={{ width: `${sidebarWidth}px`, minWidth: '150px' }}
+              >
+                {tree}
+              </div>
             </>
           )}
-          <div className="h-full min-w-0 flex-1">{editor}</div>
         </>
       )}
 

@@ -36,6 +36,15 @@ export type SaveState =
   | { kind: "error"; message: string }
   | { kind: "conflict"; currentSha256: string | null };
 
+export interface TabState {
+  path: string;
+  file: OpenFile | null;
+  loading: boolean;
+  draftText: string;
+  savedText: string;
+  saveState: SaveState;
+}
+
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -48,29 +57,17 @@ export function useFilesWorkspace(threadId: string) {
   const [treeLoading, setTreeLoading] = useState(true);
   const [treeError, setTreeError] = useState<string | null>(null);
   const [truncated, setTruncated] = useState(false);
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [openFile, setOpenFile] = useState<OpenFile | null>(null);
-  const [fileLoading, setFileLoading] = useState(false);
-  const [draftText, setDraftText] = useState("");
-  const [savedText, setSavedText] = useState("");
-  const [saveState, setSaveState] = useState<SaveState>({ kind: "saved" });
 
-  const selectedRef = useRef(selectedPath);
-  const fileRef = useRef(openFile);
-  const draftRef = useRef(draftText);
-  const savedRef = useRef(savedText);
-  const saveStateRef = useRef(saveState);
+  const [tabs, setTabs] = useState<TabState[]>([]);
+  const [activePath, setActivePath] = useState<string | null>(null);
+
+  const tabsRef = useRef(tabs);
+  const activePathRef = useRef(activePath);
   const treeRequestRef = useRef(0);
-  const fileRequestRef = useRef(0);
-  const savePromiseRef = useRef<Promise<boolean> | null>(null);
+  const savePromisesRef = useRef<Record<string, Promise<boolean> | undefined>>({});
 
-  useEffect(() => void (selectedRef.current = selectedPath), [selectedPath]);
-  useEffect(() => void (fileRef.current = openFile), [openFile]);
-  useEffect(() => void (draftRef.current = draftText), [draftText]);
-  useEffect(() => void (savedRef.current = savedText), [savedText]);
-  useEffect(() => void (saveStateRef.current = saveState), [saveState]);
-
-  const isDirty = openFile?.state === "text" && draftText !== savedText;
+  useEffect(() => void (tabsRef.current = tabs), [tabs]);
+  useEffect(() => void (activePathRef.current = activePath), [activePath]);
 
   const refreshTree = useCallback(
     async (nextQuery = query, silent = false) => {
@@ -103,153 +100,180 @@ export function useFilesWorkspace(threadId: string) {
     return () => window.clearTimeout(timer);
   }, [query, refreshTree]);
 
-  const save = useCallback(async (): Promise<boolean> => {
-    if (savePromiseRef.current) return savePromiseRef.current;
-    const file = fileRef.current;
-    const selected = selectedRef.current;
-    const draft = draftRef.current;
+  const save = useCallback(async (path: string): Promise<boolean> => {
+    const existingPromise = savePromisesRef.current[path];
+    if (existingPromise) return existingPromise;
+    const tab = tabsRef.current.find(t => t.path === path);
+    if (!tab) return false;
+    
     if (
-      file?.state !== "text" ||
-      selected === null ||
-      draft === savedRef.current
+      tab.file?.state !== "text" ||
+      tab.draftText === tab.savedText
     ) {
-      return saveStateRef.current.kind !== "conflict";
+      return tab.saveState.kind !== "conflict";
     }
-    if (saveStateRef.current.kind === "conflict") return false;
+    if (tab.saveState.kind === "conflict") return false;
 
     const pending = (async () => {
-      setSaveState({ kind: "saving" });
+      setTabs(curr => curr.map(t => t.path === path ? { ...t, saveState: { kind: "saving" } } : t));
       try {
         const result = await rpc.call("saveFile", {
           threadId,
-          path: selected,
-          content: draft,
-          expectedSha256: file.sha256,
+          path,
+          content: tab.draftText,
+          expectedSha256: tab.file!.sha256,
         });
         if (result.outcome === "conflict") {
-          setSaveState({
-            kind: "conflict",
-            currentSha256: result.currentSha256,
-          });
+          setTabs(curr => curr.map(t => t.path === path ? {
+            ...t,
+            saveState: { kind: "conflict", currentSha256: result.currentSha256 },
+          } : t));
           return false;
         }
-        if (selectedRef.current === selected) {
-          setOpenFile((current) =>
-            current?.state === "text" && current.path === selected
-              ? { ...current, sha256: result.sha256, sizeBytes: result.sizeBytes }
-              : current,
-          );
-          setSavedText(draft);
-          setSaveState({ kind: "saved" });
-        }
+        setTabs(curr => curr.map(t => {
+          if (t.path !== path) return t;
+          return {
+            ...t,
+            file: t.file?.state === "text" ? { ...t.file, sha256: result.sha256, sizeBytes: result.sizeBytes } : t.file,
+            savedText: t.draftText,
+            saveState: { kind: "saved" }
+          };
+        }));
         return true;
       } catch (error) {
-        if (selectedRef.current === selected) {
-          setSaveState({ kind: "error", message: message(error) });
-        }
+        setTabs(curr => curr.map(t => t.path === path ? { ...t, saveState: { kind: "error", message: message(error) } } : t));
         return false;
       }
     })();
-    savePromiseRef.current = pending;
+    savePromisesRef.current[path] = pending;
     try {
       return await pending;
     } finally {
-      if (savePromiseRef.current === pending) savePromiseRef.current = null;
+      if (savePromisesRef.current[path] === pending) {
+        delete savePromisesRef.current[path];
+      }
     }
   }, [rpc, threadId]);
 
-  const applyReadResult = useCallback((path: string, result: OpenFile) => {
-    setSelectedPath(path);
-    setOpenFile(result);
-    if (result.state === "text") {
-      setDraftText(result.content);
-      setSavedText(result.content);
-    } else {
-      setDraftText("");
-      setSavedText("");
-    }
-    setSaveState({ kind: "saved" });
-  }, []);
-
   const openPath = useCallback(
     async (path: string): Promise<boolean> => {
-      if (path === selectedRef.current) return true;
-      if (!(await save())) return false;
-      const request = ++fileRequestRef.current;
-      setFileLoading(true);
+      setActivePath(path);
+      const existingTab = tabsRef.current.find(t => t.path === path);
+      if (existingTab) return true;
+
+      setTabs(curr => [...curr, {
+        path,
+        file: null,
+        loading: true,
+        draftText: "",
+        savedText: "",
+        saveState: { kind: "saved" }
+      }]);
+
       try {
         const result = await rpc.call("readFile", { threadId, path });
-        if (request !== fileRequestRef.current) return false;
-        applyReadResult(path, result);
+        setTabs(curr => curr.map(t => {
+          if (t.path !== path) return t;
+          return {
+            ...t,
+            file: result,
+            loading: false,
+            draftText: result.state === "text" ? result.content : "",
+            savedText: result.state === "text" ? result.content : "",
+            saveState: { kind: "saved" }
+          };
+        }));
         return true;
       } catch (error) {
-        if (request === fileRequestRef.current) {
-          setSaveState({ kind: "error", message: message(error) });
-        }
+        setTabs(curr => curr.map(t => {
+          if (t.path !== path) return t;
+          return {
+            ...t,
+            loading: false,
+            saveState: { kind: "error", message: message(error) }
+          };
+        }));
         return false;
-      } finally {
-        if (request === fileRequestRef.current) setFileLoading(false);
       }
     },
-    [applyReadResult, rpc, save, threadId],
+    [rpc, threadId],
   );
 
-  const closeFile = useCallback(async () => {
-    if (!(await save())) return false;
-    ++fileRequestRef.current;
-    setSelectedPath(null);
-    setOpenFile(null);
-    setDraftText("");
-    setSavedText("");
-    setSaveState({ kind: "saved" });
+  const closeFile = useCallback(async (path: string) => {
+    const tab = tabsRef.current.find(t => t.path === path);
+    const isDirty = tab?.file?.state === "text" && tab.draftText !== tab.savedText;
+    if (isDirty) {
+      if (!(await save(path))) return false;
+    }
+    setTabs(curr => {
+      const filtered = curr.filter(t => t.path !== path);
+      if (activePathRef.current === path) {
+        setActivePath(filtered.length > 0 ? filtered[filtered.length - 1].path : null);
+      }
+      return filtered;
+    });
     return true;
   }, [save]);
 
   useEffect(() => {
-    if (!isDirty || saveState.kind === "conflict") return;
-    const timer = window.setTimeout(() => void save(), 700);
-    return () => window.clearTimeout(timer);
-  }, [draftText, isDirty, save, saveState.kind]);
+    const timers = tabs
+      .filter(t => t.file?.state === "text" && t.draftText !== t.savedText && t.saveState.kind !== "conflict")
+      .map(t => window.setTimeout(() => void save(t.path), 700));
+    return () => timers.forEach(timer => window.clearTimeout(timer));
+  }, [tabs, save]);
 
-  const reloadFile = useCallback(async () => {
-    const path = selectedRef.current;
-    if (path === null) return false;
-    const request = ++fileRequestRef.current;
-    setFileLoading(true);
+  const reloadFile = useCallback(async (path: string) => {
+    setTabs(curr => curr.map(t => t.path === path ? { ...t, loading: true } : t));
     try {
       const result = await rpc.call("readFile", { threadId, path });
-      if (request !== fileRequestRef.current) return false;
-      applyReadResult(path, result);
+      setTabs(curr => curr.map(t => {
+        if (t.path !== path) return t;
+        return {
+          ...t,
+          file: result,
+          loading: false,
+          draftText: result.state === "text" ? result.content : "",
+          savedText: result.state === "text" ? result.content : "",
+          saveState: { kind: "saved" }
+        };
+      }));
       return true;
     } catch (error) {
-      setSaveState({ kind: "error", message: message(error) });
+      setTabs(curr => curr.map(t => t.path === path ? { 
+        ...t, 
+        loading: false, 
+        saveState: { kind: "error", message: message(error) } 
+      } : t));
       return false;
-    } finally {
-      if (request === fileRequestRef.current) setFileLoading(false);
     }
-  }, [applyReadResult, rpc, threadId]);
+  }, [rpc, threadId]);
 
-  const overwrite = useCallback(async () => {
-    const path = selectedRef.current;
-    const file = fileRef.current;
-    if (path === null || file?.state !== "text") return false;
-    setSaveState({ kind: "saving" });
+  const overwrite = useCallback(async (path: string) => {
+    const tab = tabsRef.current.find(t => t.path === path);
+    if (!tab || tab.file?.state !== "text") return false;
+    setTabs(curr => curr.map(t => t.path === path ? { ...t, saveState: { kind: "saving" } } : t));
     try {
       const result = await rpc.call("overwriteFile", {
         threadId,
         path,
-        content: draftRef.current,
+        content: tab.draftText,
       });
       if (result.outcome === "conflict") {
-        setSaveState({ kind: "conflict", currentSha256: result.currentSha256 });
+        setTabs(curr => curr.map(t => t.path === path ? { ...t, saveState: { kind: "conflict", currentSha256: result.currentSha256 } } : t));
         return false;
       }
-      setOpenFile({ ...file, sha256: result.sha256, sizeBytes: result.sizeBytes });
-      setSavedText(draftRef.current);
-      setSaveState({ kind: "saved" });
+      setTabs(curr => curr.map(t => {
+        if (t.path !== path) return t;
+        return {
+          ...t,
+          file: { ...t.file, sha256: result.sha256, sizeBytes: result.sizeBytes } as OpenFile,
+          savedText: tab.draftText,
+          saveState: { kind: "saved" }
+        };
+      }));
       return true;
     } catch (error) {
-      setSaveState({ kind: "error", message: message(error) });
+      setTabs(curr => curr.map(t => t.path === path ? { ...t, saveState: { kind: "error", message: message(error) } } : t));
       return false;
     }
   }, [rpc, threadId]);
@@ -257,25 +281,35 @@ export function useFilesWorkspace(threadId: string) {
   useEffect(() => {
     const timer = window.setInterval(() => {
       void refreshTree(query, true);
-      const path = selectedRef.current;
-      const current = fileRef.current;
-      if (path === null || current === null) return;
-      void rpc
-        .call("readFile", { threadId, path })
-        .then((remote) => {
-          if (selectedRef.current !== path || remote.sha256 === current.sha256) {
-            return;
-          }
-          if (draftRef.current !== savedRef.current) {
-            setSaveState({ kind: "conflict", currentSha256: remote.sha256 });
-            return;
-          }
-          applyReadResult(path, remote);
-        })
-        .catch(() => undefined);
+      const currentTabs = tabsRef.current;
+      currentTabs.forEach(tab => {
+        const path = tab.path;
+        if (!tab.file) return;
+        void rpc
+          .call("readFile", { threadId, path })
+          .then((remote) => {
+            const latestTab = tabsRef.current.find(t => t.path === path);
+            if (!latestTab || latestTab.file?.sha256 === tab.file?.sha256) return;
+            
+            if (latestTab.draftText !== latestTab.savedText) {
+              setTabs(curr => curr.map(t => t.path === path ? { ...t, saveState: { kind: "conflict", currentSha256: remote.sha256 } } : t));
+            } else {
+              setTabs(curr => curr.map(t => {
+                if (t.path !== path) return t;
+                return {
+                  ...t,
+                  file: remote,
+                  draftText: remote.state === "text" ? remote.content : "",
+                  savedText: remote.state === "text" ? remote.content : "",
+                };
+              }));
+            }
+          })
+          .catch(() => undefined);
+      });
     }, 10_000);
     return () => window.clearInterval(timer);
-  }, [applyReadResult, query, refreshTree, rpc, threadId]);
+  }, [query, refreshTree, rpc, threadId]);
 
   const runMutation = useCallback(
     async (operation: () => Promise<unknown>) => {
@@ -311,11 +345,16 @@ export function useFilesWorkspace(threadId: string) {
     (sourcePath: string, destinationPath: string) =>
       runMutation(async () => {
         await rpc.call("movePath", { threadId, sourcePath, destinationPath });
-        if (selectedRef.current === sourcePath) {
-          setSelectedPath(destinationPath);
-          setOpenFile((current) =>
-            current ? { ...current, path: destinationPath } : null,
-          );
+        setTabs(curr => curr.map(t => {
+          if (t.path !== sourcePath) return t;
+          return {
+            ...t,
+            path: destinationPath,
+            file: t.file ? { ...t.file, path: destinationPath } as OpenFile : null
+          };
+        }));
+        if (activePathRef.current === sourcePath) {
+          setActivePath(destinationPath);
         }
       }),
     [rpc, runMutation, threadId],
@@ -325,13 +364,13 @@ export function useFilesWorkspace(threadId: string) {
     (path: string, recursive: boolean) =>
       runMutation(async () => {
         await rpc.call("removePath", { threadId, path, recursive });
-        const selected = selectedRef.current;
-        if (selected === path || selected?.startsWith(`${path}/`)) {
-          setSelectedPath(null);
-          setOpenFile(null);
-          setDraftText("");
-          setSavedText("");
-        }
+        setTabs(curr => {
+          const filtered = curr.filter(t => !(t.path === path || t.path.startsWith(`${path}/`)));
+          if (!filtered.find(t => t.path === activePathRef.current)) {
+            setActivePath(filtered.length > 0 ? filtered[filtered.length - 1].path : null);
+          }
+          return filtered;
+        });
       }),
     [rpc, runMutation, threadId],
   );
@@ -373,26 +412,30 @@ export function useFilesWorkspace(threadId: string) {
         a.click();
         document.body.removeChild(a);
       } catch (error) {
-        setSaveState({ kind: "error", message: message(error) });
+        setTabs(curr => curr.map(t => t.path === path ? { ...t, saveState: { kind: "error", message: message(error) } } : t));
       }
     },
     [getDownloadUrl]
   );
 
+  const setDraftText = useCallback((path: string, text: string) => {
+    setTabs(curr => curr.map(t => t.path === path ? { ...t, draftText: text } : t));
+  }, []);
+
   return useMemo(
     () => ({
+      tabs,
+      activePath,
+      setActivePath,
       closeFile,
       createDirectory,
       createFile,
       downloadPath,
       getDownloadUrl,
-      draftText,
+      setDraftText,
       duplicatePath,
       entries,
-      fileLoading,
-      isDirty,
       movePath,
-      openFile,
       openPath,
       overwrite,
       query,
@@ -401,27 +444,23 @@ export function useFilesWorkspace(threadId: string) {
       removePath,
       rootName,
       save,
-      saveState,
-      selectedPath,
-      setDraftText,
       setQuery,
       treeError,
       treeLoading,
       truncated,
     }),
     [
+      tabs,
+      activePath,
       closeFile,
       createDirectory,
       createFile,
       downloadPath,
       getDownloadUrl,
-      draftText,
+      setDraftText,
       duplicatePath,
       entries,
-      fileLoading,
-      isDirty,
       movePath,
-      openFile,
       openPath,
       overwrite,
       query,
@@ -430,8 +469,6 @@ export function useFilesWorkspace(threadId: string) {
       removePath,
       rootName,
       save,
-      saveState,
-      selectedPath,
       treeError,
       treeLoading,
       truncated,
