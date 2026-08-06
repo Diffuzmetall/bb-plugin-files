@@ -8,11 +8,11 @@ A standalone BB plugin that adds **Actions → Files** to every thread. The pane
 - **Depth-first tree rendering**: accurately reconstructs project hierarchy with auto-expansion of active file paths;
 - **Hidden files support**: dynamically probes and reveals common configuration dotfiles (e.g. `.env`, `.gitignore`, `.github`, `.vscode`, etc.) which are normally excluded by the host lister;
 - UTF-8 editing up to 2 MiB with CodeMirror 6;
-- BB-native Markdown **Preview** plus editable **Raw** mode;
+- BB-native Markdown **Preview**, editable **Raw** mode, and **Image Previews** (inline rendering for image files);
 - 700 ms autosave, Save, and Cmd/Ctrl+S;
 - SHA-based compare-and-swap with explicit Reload/Overwrite conflict handling;
 - 10-second tree/file external-change polling;
-- create, rename (safely preserves unsaved drafts), duplicate, recursive delete, copy file content, and copy relative path actions;
+- create, rename (safely preserves unsaved drafts), duplicate, recursive delete, copy file content, copy relative path, and **download** actions;
 - narrow panel navigation with a Back control;
 - symlinks and `node_modules` remain excluded by BB's host lister.
 
