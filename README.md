@@ -4,6 +4,8 @@ A standalone BB plugin that adds **Actions → Files** to every thread. The pane
 
 ## Features
 
+- **Multi-Tab Editor**: Open multiple files simultaneously with a modern tab bar. Seamlessly switch between files while each tab preserves its own draft state, autosave timers, and scroll position;
+- **Resizable Layout**: Modern IDE-style interface with the editor on the left and a resizable, collapsible file tree on the right;
 - bounded recursive tree (up to 10,000 files) with fuzzy file search;
 - **Depth-first tree rendering**: accurately reconstructs project hierarchy with auto-expansion of active file paths;
 - **Hidden files support**: dynamically probes and reveals common configuration dotfiles (e.g. `.env`, `.gitignore`, `.github`, `.vscode`, etc.) which are normally excluded by the host lister;
