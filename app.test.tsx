@@ -42,6 +42,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  window.localStorage.clear();
   vi.unstubAllGlobals();
 });
 
@@ -91,6 +92,56 @@ describe("Files plugin app", () => {
     expect((await view.findByTestId("native-markdown")).textContent).toBe(
       "# Project",
     );
+  });
+
+  it("restores open tabs after the Files panel remounts", async () => {
+    const { useFilesWorkspace } = await import(
+      "./src/hooks/useFilesWorkspace"
+    );
+    const { renderHook } = await import("@testing-library/react");
+    setRpcHandlers({
+      listTree: () => ({ rootName: "repo", entries: [], truncated: false }),
+      readFile: (input: unknown) => {
+        const path =
+          typeof input === "object" &&
+          input !== null &&
+          "path" in input &&
+          typeof input.path === "string"
+            ? input.path
+            : "";
+        return {
+          state: "text",
+          path,
+          sha256: `sha-${path}`,
+          sizeBytes: path.length,
+          mimeType: "text/plain",
+          modifiedAtMs: 1,
+          content: `content:${path}`,
+        };
+      },
+    });
+
+    const first = renderHook(() => useFilesWorkspace("thread-restore"));
+    await act(async () => {
+      await first.result.current.openPath("README.md");
+      await first.result.current.openPath("src/app.tsx");
+    });
+    act(() => first.result.current.setActivePath("README.md"));
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem("bb-plugin-files:workspace:thread-restore")).toContain("src/app.tsx");
+    });
+    first.unmount();
+
+    const second = renderHook(() => useFilesWorkspace("thread-restore"));
+    expect(second.result.current.tabs.map((tab) => tab.path)).toEqual([
+      "README.md",
+      "src/app.tsx",
+    ]);
+    expect(second.result.current.activePath).toBe("README.md");
+    await waitFor(() => {
+      expect(second.result.current.tabs.every((tab) => tab.file !== null)).toBe(true);
+    });
   });
 
   it("preserves a dirty draft and reports a CAS conflict", async () => {

@@ -45,8 +45,49 @@ export interface TabState {
   saveState: SaveState;
 }
 
+const WORKSPACE_STORAGE_PREFIX = "bb-plugin-files:workspace:";
+
+interface StoredWorkspaceState {
+  version: 1;
+  openPaths: string[];
+  activePath: string | null;
+}
+
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function storageKey(threadId: string): string {
+  return `${WORKSPACE_STORAGE_PREFIX}${threadId}`;
+}
+
+function dedupePaths(paths: string[]): string[] {
+  return Array.from(new Set(paths.filter((path) => path.length > 0)));
+}
+
+function loadStoredWorkspace(threadId: string): StoredWorkspaceState {
+  if (typeof window === "undefined") {
+    return { version: 1, openPaths: [], activePath: null };
+  }
+  try {
+    const raw = window.localStorage.getItem(storageKey(threadId));
+    if (raw === null) return { version: 1, openPaths: [], activePath: null };
+    const parsed = JSON.parse(raw) as Partial<StoredWorkspaceState>;
+    const openPaths = dedupePaths(Array.isArray(parsed.openPaths) ? parsed.openPaths.filter((value): value is string => typeof value === "string") : []);
+    const activePath = typeof parsed.activePath === "string" && openPaths.includes(parsed.activePath) ? parsed.activePath : openPaths[0] ?? null;
+    return { version: 1, openPaths, activePath };
+  } catch {
+    return { version: 1, openPaths: [], activePath: null };
+  }
+}
+
+function saveStoredWorkspace(threadId: string, state: StoredWorkspaceState): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(storageKey(threadId), JSON.stringify(state));
+  } catch {
+    // Ignore storage failures. The editor still works without persisted tabs.
+  }
 }
 
 export function useFilesWorkspace(threadId: string) {
@@ -58,16 +99,76 @@ export function useFilesWorkspace(threadId: string) {
   const [treeError, setTreeError] = useState<string | null>(null);
   const [truncated, setTruncated] = useState(false);
 
-  const [tabs, setTabs] = useState<TabState[]>([]);
-  const [activePath, setActivePath] = useState<string | null>(null);
+  const [initialWorkspace] = useState(() => loadStoredWorkspace(threadId));
+  const [tabs, setTabs] = useState<TabState[]>(() =>
+    initialWorkspace.openPaths.map((path) => ({
+      path,
+      file: null,
+      loading: true,
+      draftText: "",
+      savedText: "",
+      saveState: { kind: "saved" },
+    })),
+  );
+  const [activePath, setActivePath] = useState<string | null>(initialWorkspace.activePath);
 
   const tabsRef = useRef(tabs);
   const activePathRef = useRef(activePath);
   const treeRequestRef = useRef(0);
+  const fileLoadRequestsRef = useRef<Set<string>>(new Set());
   const savePromisesRef = useRef<Record<string, Promise<boolean> | undefined>>({});
 
   useEffect(() => void (tabsRef.current = tabs), [tabs]);
   useEffect(() => void (activePathRef.current = activePath), [activePath]);
+
+  useEffect(() => {
+    saveStoredWorkspace(threadId, {
+      version: 1,
+      openPaths: tabs.map((tab) => tab.path),
+      activePath,
+    });
+  }, [activePath, tabs, threadId]);
+
+  useEffect(() => {
+    tabs.forEach((tab) => {
+      if (tab.file !== null || !tab.loading || fileLoadRequestsRef.current.has(tab.path)) return;
+      const path = tab.path;
+      fileLoadRequestsRef.current.add(path);
+      void rpc
+        .call("readFile", { threadId, path })
+        .then((result) => {
+          setTabs((curr) =>
+            curr.map((current) => {
+              if (current.path !== path) return current;
+              return {
+                ...current,
+                file: result,
+                loading: false,
+                draftText: result.state === "text" ? result.content : "",
+                savedText: result.state === "text" ? result.content : "",
+                saveState: { kind: "saved" },
+              };
+            }),
+          );
+        })
+        .catch((error) => {
+          setTabs((curr) =>
+            curr.map((current) =>
+              current.path === path
+                ? {
+                    ...current,
+                    loading: false,
+                    saveState: { kind: "error", message: message(error) },
+                  }
+                : current,
+            ),
+          );
+        })
+        .finally(() => {
+          fileLoadRequestsRef.current.delete(path);
+        });
+    });
+  }, [rpc, tabs, threadId]);
 
   const refreshTree = useCallback(
     async (nextQuery = query, silent = false) => {
