@@ -41,13 +41,22 @@ function SaveLabel({ state, dirty }: { state: SaveState; dirty: boolean }) {
   );
 }
 
+import { type TabState } from "../hooks/useFilesWorkspace";
+
+export function getFileIconForEditor(name: string) {
+  const lower = name.toLowerCase();
+  if (/\.(ts|tsx|js|jsx|json|css|scss|html|xml|yaml|yml|sh|bash)$/.test(lower)) return "Code";
+  if (/\.(md|txt|csv|log)$/.test(lower)) return "FileText";
+  if (/\.(png|jpg|jpeg|gif|svg|webp|ico|icns)$/.test(lower)) return "FileAttachment";
+  return "File";
+}
+
 export function EditorPane({
-  draftText,
-  file,
-  fileLoading,
-  isDirty,
+  tabs,
+  activePath,
   narrow,
-  onBack,
+  onTabSelect,
+  onTabClose,
   onChange,
   onOverwrite,
   onReload,
@@ -56,27 +65,32 @@ export function EditorPane({
   onToggleSidebar,
   isSidebarOpen,
   getDownloadUrl,
-  saveState,
 }: {
-  draftText: string;
-  file: OpenFile | null;
-  fileLoading: boolean;
-  isDirty: boolean;
+  tabs: TabState[];
+  activePath: string | null;
   narrow: boolean;
-  onBack(): void;
-  onChange(value: string): void;
-  onOverwrite(): void;
-  onReload(): void;
-  onSave(): void;
-  onDownload(): void;
+  onTabSelect(path: string): void;
+  onTabClose(path: string): void;
+  onChange(path: string, value: string): void;
+  onOverwrite(path: string): void;
+  onReload(path: string): void;
+  onSave(path: string): void;
+  onDownload(path: string): void;
   onToggleSidebar?(): void;
   isSidebarOpen?: boolean;
   getDownloadUrl(path: string): Promise<string>;
-  saveState: SaveState;
 }) {
   const [mode, setMode] = useState<"preview" | "raw">("raw");
   const [copied, setCopied] = useState(false);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  
+  const activeTab = tabs.find(t => t.path === activePath);
+  const file = activeTab?.file || null;
+  const draftText = activeTab?.draftText || "";
+  const saveState = activeTab?.saveState || { kind: "saved" };
+  const fileLoading = activeTab?.loading || false;
+  const isDirty = file?.state === "text" && draftText !== activeTab?.savedText;
+
   const markdown = file !== null && isMarkdown(file.path);
   const isImage = file !== null && file.state === "unsupported" && Boolean(file.mimeType?.startsWith("image/"));
 
@@ -99,9 +113,9 @@ export function EditorPane({
   return (
     <section className="flex h-full min-h-0 min-w-0 flex-col bg-background">
       {/* TAB BAR */}
-      <div className="flex h-9 shrink-0 items-end bg-muted/30 border-b border-border-seam pr-2 pl-0 relative">
+      <div className="flex h-9 shrink-0 items-end bg-muted/30 border-b border-border-seam pr-2 pl-0 relative overflow-x-auto no-scrollbar">
         {!isSidebarOpen && onToggleSidebar ? (
-          <div className="flex h-full items-center px-2">
+          <div className="flex h-full items-center px-2 shrink-0">
             <Button
               size="icon"
               variant="ghost"
@@ -109,80 +123,96 @@ export function EditorPane({
               aria-label="Show sidebar"
               onClick={onToggleSidebar}
             >
-              <Icon name="PanelLeft" className="h-4 w-4" />
+              <Icon name="PanelRight" className="h-4 w-4" />
             </Button>
           </div>
         ) : null}
 
-        {file !== null ? (
-          <div className="group relative flex h-[35px] max-w-[200px] shrink-0 items-center gap-2 border-r border-t border-border-seam bg-background px-3 text-[13px] text-foreground transition-colors after:absolute after:left-0 after:top-0 after:h-[2px] after:w-full after:bg-primary">
-            <span className="min-w-0 flex-1 truncate select-none">
-              {file.path.split("/").pop()}
-            </span>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onBack();
-              }}
-              className="grid h-[18px] w-[18px] shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
-              aria-label="Close file"
-            >
-              {isDirty ? (
-                <div className="h-2 w-2 rounded-full bg-foreground opacity-100" />
-              ) : (
-                <Icon name="X" className="h-[14px] w-[14px]" />
-              )}
-            </button>
-            {/* Always show dirty dot when not hovered */}
-            {isDirty && (
-              <div className="absolute right-3.5 h-2 w-2 rounded-full bg-foreground opacity-100 group-hover:opacity-0 transition-opacity pointer-events-none" />
-            )}
-          </div>
-        ) : null}
+        <div className="flex h-full flex-nowrap shrink-0">
+          {tabs.map(tab => {
+            const isActive = tab.path === activePath;
+            const tabIsDirty = tab.file?.state === "text" && tab.draftText !== tab.savedText;
+            const name = tab.path.split("/").pop() || "";
+            return (
+              <div 
+                key={tab.path}
+                onClick={() => onTabSelect(tab.path)}
+                className={`group relative flex h-[35px] max-w-[200px] shrink-0 cursor-pointer items-center gap-2 border-r border-t border-border-seam px-3 text-[13px] transition-colors ${
+                  isActive ? "bg-background text-foreground after:absolute after:left-0 after:top-0 after:h-[2px] after:w-full after:bg-primary" : "bg-muted/30 text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                <Icon name={getFileIconForEditor(name) as any} className="h-3.5 w-3.5 opacity-80" />
+                <span className="min-w-0 flex-1 truncate select-none">
+                  {name}
+                </span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTabClose(tab.path);
+                  }}
+                  className="grid h-[18px] w-[18px] shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-muted-foreground/20 hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+                  aria-label="Close file"
+                >
+                  {tabIsDirty ? (
+                    <div className="h-2 w-2 rounded-full bg-foreground opacity-100" />
+                  ) : (
+                    <Icon name="X" className="h-[14px] w-[14px]" />
+                  )}
+                </button>
+                {/* Always show dirty dot when not hovered */}
+                {tabIsDirty && (
+                  <div className="absolute right-3.5 h-2 w-2 rounded-full bg-foreground opacity-100 group-hover:opacity-0 transition-opacity pointer-events-none" />
+                )}
+              </div>
+            );
+          })}
+        </div>
 
         <div className="flex-1" />
 
-        {file !== null ? (
-          <div className="flex h-full items-center gap-1 pb-1">
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-6 w-6 text-muted-foreground hover:text-foreground"
-              aria-label="Download file"
-              onClick={onDownload}
-            >
-              <Icon name="Download" className="h-4 w-4" />
-            </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-6 w-6 text-muted-foreground hover:text-foreground"
-              aria-label={copied ? "Copied" : "Copy file content"}
-              disabled={file.state !== "text"}
-              onClick={async () => {
-                if (file.state !== "text") return;
-                try {
-                  await navigator.clipboard.writeText(draftText);
-                  setCopied(true);
-                  window.setTimeout(() => setCopied(false), 1200);
-                } catch {
-                  /* clipboard unavailable */
-                }
-              }}
-            >
-              <Icon name={copied ? "Check" : "Copy"} className="h-4 w-4" />
-            </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-6 w-6 text-muted-foreground hover:text-foreground"
-              aria-label="Reload file"
-              onClick={onReload}
-            >
-              <Icon name="RotateCcw" className="h-4 w-4" />
-            </Button>
-          </div>
-        ) : null}
+        <div className="flex h-full items-center gap-1 pb-1 shrink-0">
+          {file !== null ? (
+            <>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                aria-label="Download file"
+                onClick={() => onDownload(activePath!)}
+              >
+                <Icon name="Download" className="h-4 w-4" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                aria-label={copied ? "Copied" : "Copy file content"}
+                disabled={file.state !== "text"}
+                onClick={async () => {
+                  if (file.state !== "text") return;
+                  try {
+                    await navigator.clipboard.writeText(draftText);
+                    setCopied(true);
+                    window.setTimeout(() => setCopied(false), 1200);
+                  } catch {
+                    /* clipboard unavailable */
+                  }
+                }}
+              >
+                <Icon name={copied ? "Check" : "Copy"} className="h-4 w-4" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                aria-label="Reload file"
+                onClick={() => onReload(activePath!)}
+              >
+                <Icon name="RotateCcw" className="h-4 w-4" />
+              </Button>
+            </>
+          ) : null}
+        </div>
       </div>
 
       {/* BREADCRUMB / ACTIONS (Optional secondary bar, for Markdown toggle) */}
@@ -229,17 +259,17 @@ export function EditorPane({
           {saveState.kind === "conflict" ? (
             <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-surface-destructive-border bg-surface-destructive px-3 py-2 text-xs text-destructive-text" role="alert">
               The file changed outside this editor. Your draft is preserved.
-              <Button size="sm" variant="outline" className="ml-auto h-6 text-xs" onClick={onReload}>
+              <Button size="sm" variant="outline" className="ml-auto h-6 text-xs" onClick={() => onReload(activePath!)}>
                 Reload
               </Button>
-              <Button size="sm" variant="destructive" className="h-6 text-xs" onClick={onOverwrite}>
+              <Button size="sm" variant="destructive" className="h-6 text-xs" onClick={() => onOverwrite(activePath!)}>
                 Overwrite
               </Button>
             </div>
           ) : saveState.kind === "error" ? (
             <div className="flex shrink-0 items-center gap-2 border-b border-surface-destructive-border bg-surface-destructive px-3 py-2 text-xs text-destructive-text" role="alert">
               {saveState.message}
-              <Button size="sm" variant="outline" className="ml-auto h-6 text-xs" onClick={onSave}>
+              <Button size="sm" variant="outline" className="ml-auto h-6 text-xs" onClick={() => onSave(activePath!)}>
                 Retry
               </Button>
             </div>
@@ -278,8 +308,8 @@ export function EditorPane({
               <CodeEditor
                 filePath={file.path}
                 value={draftText}
-                onChange={onChange}
-                onSave={onSave}
+                onChange={(val) => onChange(activePath!, val)}
+                onSave={() => onSave(activePath!)}
               />
             )}
           </div>

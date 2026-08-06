@@ -116,18 +116,18 @@ describe("Files plugin app", () => {
     await act(async () => {
       await hook.result.current.openPath("README.md");
     });
-    act(() => hook.result.current.setDraftText("my draft"));
+    act(() => hook.result.current.setDraftText("README.md", "my draft"));
     await act(async () => {
-      expect(await hook.result.current.save()).toBe(false);
+      expect(await hook.result.current.save("README.md")).toBe(false);
     });
 
     await waitFor(() => {
-      expect(hook.result.current.saveState).toEqual({
+      expect(hook.result.current.tabs.find(t => t.path === "README.md")?.saveState).toEqual({
         kind: "conflict",
         currentSha256: "sha-new",
       });
     });
-    expect(hook.result.current.draftText).toBe("my draft");
-    expect(hook.result.current.selectedPath).toBe("README.md");
+    expect(hook.result.current.tabs.find(t => t.path === "README.md")?.draftText).toBe("my draft");
+    expect(hook.result.current.activePath).toBe("README.md");
   });
 });
