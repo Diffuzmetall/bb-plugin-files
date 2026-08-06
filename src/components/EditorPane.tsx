@@ -3,7 +3,7 @@ import { Markdown } from "@bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { CodeEditor } from "./CodeEditor";
-import type { OpenFile, SaveState } from "../hooks/useFilesWorkspace";
+import type { SaveState, TabState } from "../hooks/useFilesWorkspace";
 
 function isMarkdown(path: string): boolean {
   return /\.(?:md|mdx|markdown)$/iu.test(path);
@@ -40,8 +40,6 @@ function SaveLabel({ state, dirty }: { state: SaveState; dirty: boolean }) {
     </span>
   );
 }
-
-import { type TabState } from "../hooks/useFilesWorkspace";
 
 export function getFileIconForEditor(name: string) {
   const lower = name.toLowerCase();
@@ -82,7 +80,7 @@ export function EditorPane({
 }) {
   const [mode, setMode] = useState<"preview" | "raw">("raw");
   const [copied, setCopied] = useState(false);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   
   const activeTab = tabs.find(t => t.path === activePath);
   const file = activeTab?.file || null;
@@ -92,23 +90,25 @@ export function EditorPane({
   const isDirty = file?.state === "text" && draftText !== activeTab?.savedText;
 
   const markdown = file !== null && isMarkdown(file.path);
+  const isHtml = file !== null && /\.(html|htm)$/i.test(file.path);
   const isImage = file !== null && file.state === "unsupported" && Boolean(file.mimeType?.startsWith("image/"));
+  const previewSrc = previewUrl && file ? `${previewUrl}${previewUrl.includes("?") ? "&" : "?"}t=${encodeURIComponent(file.sha256)}` : null;
 
-  useEffect(() => setMode(markdown ? "preview" : "raw"), [file?.path, markdown]);
+  useEffect(() => setMode(markdown || isHtml ? "preview" : "raw"), [file?.path, markdown, isHtml]);
 
   useEffect(() => {
     let cancelled = false;
-    if (isImage && file) {
+    if ((isImage || isHtml) && file) {
       getDownloadUrl(file.path).then((url) => {
-        if (!cancelled) setImageUrl(url);
+        if (!cancelled) setPreviewUrl(url);
       }).catch(() => {
-        if (!cancelled) setImageUrl(null);
+        if (!cancelled) setPreviewUrl(null);
       });
     } else {
-      setImageUrl(null);
+      setPreviewUrl(null);
     }
     return () => void (cancelled = true);
-  }, [file?.path, isImage, getDownloadUrl]);
+  }, [file?.path, file?.sha256, isImage, isHtml, getDownloadUrl]);
 
   return (
     <section className="flex h-full min-h-0 min-w-0 flex-col bg-background">
@@ -216,10 +216,27 @@ export function EditorPane({
         </div>
       </div>
 
-      {/* BREADCRUMB / ACTIONS (Optional secondary bar, for Markdown toggle) */}
-      {file !== null && markdown && file.state === "text" ? (
-        <div className="flex h-9 shrink-0 items-center justify-end border-b border-border-seam px-2 bg-background">
-          <div className="flex rounded-md border border-input p-0.5" role="group" aria-label="Markdown view">
+      {/* BREADCRUMB / ACTIONS (Optional secondary bar, for Markdown/HTML toggle) */}
+      {file !== null && (markdown || isHtml) && file.state === "text" ? (
+        <div className="flex h-9 shrink-0 items-center justify-between border-b border-border-seam px-2 bg-background">
+          <div className="flex min-w-0 items-center gap-2">
+            {isHtml ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
+                disabled={!previewSrc}
+                onClick={() => {
+                  if (!previewSrc) return;
+                  window.open(previewSrc, "_blank", "noopener,noreferrer");
+                }}
+              >
+                <Icon name="ExternalLink" className="mr-1.5 h-3.5 w-3.5" />
+                Open preview
+              </Button>
+            ) : null}
+          </div>
+          <div className="flex rounded-md border border-input p-0.5" role="group" aria-label="View mode">
             <Button
               size="sm"
               variant={mode === "preview" ? "secondary" : "ghost"}
@@ -279,9 +296,9 @@ export function EditorPane({
           <div className="min-h-0 flex-1 overflow-hidden relative">
             {isImage ? (
               <div className="grid h-full place-items-center bg-[var(--canvas)] p-6 checkerboard-bg">
-                {imageUrl ? (
+                {previewUrl ? (
                   <img 
-                    src={imageUrl} 
+                    src={previewUrl} 
                     alt={file.path} 
                     className="max-h-full max-w-full object-contain drop-shadow-md"
                   />
@@ -301,9 +318,20 @@ export function EditorPane({
                   </p>
                 </div>
               </div>
-            ) : markdown && mode === "preview" ? (
-              <div className="h-full overflow-y-auto p-6 bg-background">
-                <Markdown content={draftText} />
+            ) : (markdown || isHtml) && mode === "preview" ? (
+              <div className="h-full overflow-y-auto bg-background">
+                {markdown ? (
+                  <div className="p-6">
+                    <Markdown content={draftText} />
+                  </div>
+                ) : (
+                  <iframe 
+                    src={previewSrc ?? "about:blank"} 
+                    className="w-full h-full border-0 bg-white"
+                    title="HTML Preview"
+                    sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                  />
+                )}
               </div>
             ) : (
               <CodeEditor
