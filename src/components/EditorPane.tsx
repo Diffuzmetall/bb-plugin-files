@@ -180,18 +180,7 @@ export function EditorPane({
           <Icon name="RotateCcw" />
         </Button>
         {file.state === "text" ? (
-          <>
-            <SaveLabel state={saveState} dirty={isDirty} />
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8"
-              disabled={!isDirty || saveState.kind === "saving" || saveState.kind === "conflict"}
-              onClick={onSave}
-            >
-              Save
-            </Button>
-          </>
+          <SaveLabel state={saveState} dirty={isDirty} />
         ) : null}
       </div>
 
