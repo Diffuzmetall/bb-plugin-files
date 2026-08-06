@@ -19,5 +19,5 @@ export function useResponsiveLayout() {
     return () => observer.disconnect();
   }, [node]);
 
-  return { containerRef: ref, isNarrow };
+  return { containerRef: ref, containerNode: node, isNarrow };
 }

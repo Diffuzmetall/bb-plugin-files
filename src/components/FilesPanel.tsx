@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import type { PluginThreadPanelProps } from "@bb/plugin-sdk/app";
 import {
   AlertDialog,
@@ -42,10 +42,42 @@ function duplicateSuggestion(entry: FileTreeEntry): string {
 
 export function FilesPanel({ threadId }: PluginThreadPanelProps) {
   const workspace = useFilesWorkspace(threadId);
-  const { containerRef, isNarrow } = useResponsiveLayout();
+  const { containerRef, containerNode, isNarrow } = useResponsiveLayout();
   const [operation, setOperation] = useState<OperationRequest | null>(null);
   const [deleteEntry, setDeleteEntry] = useState<FileTreeEntry | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const [sidebarWidth, setSidebarWidth] = useState(260);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const isResizing = useRef(false);
+
+  const startResizing = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    isResizing.current = true;
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isResizing.current) return;
+    const containerRect = containerNode?.getBoundingClientRect();
+    if (containerRect) {
+      let newWidth = e.clientX - containerRect.left;
+      if (newWidth < 100) {
+        setIsSidebarOpen(false);
+        isResizing.current = false;
+        e.currentTarget.releasePointerCapture(e.pointerId);
+        return;
+      }
+      if (newWidth > containerRect.width - 200) newWidth = containerRect.width - 200;
+      setSidebarWidth(newWidth);
+    }
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    isResizing.current = false;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  };
 
   const requestCreate = (kind: "file" | "directory", parent = "") => {
     setOperation({
@@ -111,6 +143,8 @@ export function FilesPanel({ threadId }: PluginThreadPanelProps) {
       onReload={() => void workspace.reloadFile()}
       onSave={() => void workspace.save()}
       onDownload={() => workspace.selectedPath && void workspace.downloadPath(workspace.selectedPath)}
+      onToggleSidebar={() => setIsSidebarOpen((prev) => !prev)}
+      isSidebarOpen={isSidebarOpen}
       getDownloadUrl={workspace.getDownloadUrl}
       saveState={workspace.saveState}
     />
@@ -122,7 +156,23 @@ export function FilesPanel({ threadId }: PluginThreadPanelProps) {
         workspace.selectedPath === null ? tree : editor
       ) : (
         <>
-          <div className="h-full min-w-[220px] max-w-[320px] basis-[38%] border-r border-border-seam">{tree}</div>
+          {isSidebarOpen && (
+            <>
+              <div 
+                className="h-full shrink-0" 
+                style={{ width: `${sidebarWidth}px`, minWidth: '150px' }}
+              >
+                {tree}
+              </div>
+              <div
+                className="w-1 cursor-col-resize hover:bg-state-hover active:bg-state-active bg-border-seam shrink-0 transition-colors z-10"
+                onPointerDown={startResizing}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                onPointerCancel={onPointerUp}
+              />
+            </>
+          )}
           <div className="h-full min-w-0 flex-1">{editor}</div>
         </>
       )}
