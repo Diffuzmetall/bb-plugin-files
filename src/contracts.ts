@@ -156,6 +156,12 @@ export const filesRpcContract = defineRpcContract({
       .strict(),
     output: duplicateResultSchema,
   },
+  getDownloadUrl: {
+    input: z
+      .object({ threadId: threadIdSchema, path: targetPathSchema })
+      .strict(),
+    output: z.object({ url: z.string().min(1) }).strict(),
+  },
 });
 
 export type TreeEntry = z.infer<typeof treeEntrySchema>;

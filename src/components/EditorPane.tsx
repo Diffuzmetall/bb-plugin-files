@@ -52,6 +52,8 @@ export function EditorPane({
   onOverwrite,
   onReload,
   onSave,
+  onDownload,
+  getDownloadUrl,
   saveState,
 }: {
   draftText: string;
@@ -64,13 +66,31 @@ export function EditorPane({
   onOverwrite(): void;
   onReload(): void;
   onSave(): void;
+  onDownload(): void;
+  getDownloadUrl(path: string): Promise<string>;
   saveState: SaveState;
 }) {
   const [mode, setMode] = useState<"preview" | "raw">("raw");
   const [copied, setCopied] = useState(false);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
   const markdown = file !== null && isMarkdown(file.path);
+  const isImage = file !== null && file.state === "unsupported" && Boolean(file.mimeType?.startsWith("image/"));
 
   useEffect(() => setMode(markdown ? "preview" : "raw"), [file?.path, markdown]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (isImage && file) {
+      getDownloadUrl(file.path).then((url) => {
+        if (!cancelled) setImageUrl(url);
+      }).catch(() => {
+        if (!cancelled) setImageUrl(null);
+      });
+    } else {
+      setImageUrl(null);
+    }
+    return () => void (cancelled = true);
+  }, [file?.path, isImage, getDownloadUrl]);
 
   if (fileLoading && file === null) {
     return (
@@ -108,6 +128,15 @@ export function EditorPane({
         <span className="min-w-0 flex-1 truncate text-sm font-medium">
           {file.path}
         </span>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-8 w-8"
+          aria-label="Download file"
+          onClick={onDownload}
+        >
+          <Icon name="Download" />
+        </Button>
         <Button
           size="icon"
           variant="ghost"
@@ -197,7 +226,19 @@ export function EditorPane({
       ) : null}
 
       <div className="min-h-0 flex-1 overflow-hidden">
-        {file.state === "unsupported" ? (
+        {isImage ? (
+          <div className="grid h-full place-items-center bg-muted/20 p-6">
+            {imageUrl ? (
+              <img 
+                src={imageUrl} 
+                alt={file.path} 
+                className="max-h-full max-w-full rounded-md object-contain shadow-sm"
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">Loading image preview…</p>
+            )}
+          </div>
+        ) : file.state === "unsupported" ? (
           <div className="grid h-full place-items-center p-6 text-center">
             <div className="max-w-sm">
               <Icon name="FileQuestion" className="mx-auto mb-3 h-8 w-8 text-muted-foreground" aria-hidden />

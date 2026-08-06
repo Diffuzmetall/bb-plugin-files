@@ -15,7 +15,8 @@ export type FileAction =
   | "rename"
   | "duplicate"
   | "delete"
-  | "copy-path";
+  | "copy-path"
+  | "download";
 
 export function FileContextMenu({
   children,
@@ -42,7 +43,14 @@ export function FileContextMenu({
             </ContextMenuItem>
             <ContextMenuSeparator />
           </>
-        ) : null}
+        ) : (
+          <>
+            <ContextMenuItem onSelect={() => onAction("download", entry)}>
+              <Icon name="Download" /> Download
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+          </>
+        )}
         <ContextMenuItem onSelect={() => onAction("rename", entry)}>
           <Icon name="Edit" /> Rename
         </ContextMenuItem>
