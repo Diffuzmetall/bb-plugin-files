@@ -114,20 +114,6 @@ export function EditorPane({
     <section className="flex h-full min-h-0 min-w-0 flex-col bg-background">
       {/* TAB BAR */}
       <div className="flex h-9 shrink-0 items-end bg-muted/30 border-b border-border-seam pr-2 pl-0 relative overflow-x-auto no-scrollbar">
-        {!isSidebarOpen && onToggleSidebar ? (
-          <div className="flex h-full items-center px-2 shrink-0">
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-7 w-7 text-muted-foreground hover:text-foreground"
-              aria-label="Show sidebar"
-              onClick={onToggleSidebar}
-            >
-              <Icon name="PanelRight" className="h-4 w-4" />
-            </Button>
-          </div>
-        ) : null}
-
         <div className="flex h-full flex-nowrap shrink-0">
           {tabs.map(tab => {
             const isActive = tab.path === activePath;
@@ -209,6 +195,21 @@ export function EditorPane({
                 onClick={() => onReload(activePath!)}
               >
                 <Icon name="RotateCcw" className="h-4 w-4" />
+              </Button>
+            </>
+          ) : null}
+
+          {!isSidebarOpen && onToggleSidebar ? (
+            <>
+              {file !== null ? <div className="w-[1px] h-4 bg-border-seam mx-1" /> : null}
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                aria-label="Show sidebar"
+                onClick={onToggleSidebar}
+              >
+                <Icon name="PanelRight" className="h-4 w-4" />
               </Button>
             </>
           ) : null}
