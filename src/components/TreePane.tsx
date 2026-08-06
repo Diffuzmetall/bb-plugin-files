@@ -20,8 +20,18 @@ import {
   searchSortEntries,
 } from "../tree-order";
 
+import { type IconName } from "@/components/ui/icon";
+
 function depth(path: string): number {
   return path.split("/").length - 1;
+}
+
+function getFileIcon(name: string): IconName {
+  const lower = name.toLowerCase();
+  if (/\.(ts|tsx|js|jsx|json|css|scss|html|xml|yaml|yml|sh|bash)$/.test(lower)) return "Code";
+  if (/\.(md|txt|csv|log)$/.test(lower)) return "FileText";
+  if (/\.(png|jpg|jpeg|gif|svg|webp|ico|icns)$/.test(lower)) return "FileAttachment";
+  return "File";
 }
 
 function useLongPressContextMenu() {
@@ -73,8 +83,8 @@ function TreeRow({
         role="treeitem"
         aria-expanded={entry.kind === "directory" ? expanded : undefined}
         aria-selected={selected}
-        className="group flex h-7 shrink-0 cursor-default items-center gap-1 rounded-md pr-1 text-sm outline-none hover:bg-state-hover focus-visible:ring-1 focus-visible:ring-ring aria-selected:bg-state-active"
-        style={{ paddingLeft: `${8 + depth(entry.path) * 16}px` }}
+        className="group flex h-[22px] shrink-0 cursor-default items-center gap-[6px] pr-2 text-[13px] text-muted-foreground outline-none hover:bg-state-hover focus-visible:ring-1 focus-visible:ring-ring aria-selected:bg-state-active aria-selected:text-foreground transition-colors"
+        style={{ paddingLeft: `${8 + depth(entry.path) * 12}px` }}
         tabIndex={0}
         onClick={open}
         onKeyDown={(event) => {
@@ -99,9 +109,9 @@ function TreeRow({
         }}
         {...longPress}
       >
-        <span className="grid h-5 w-4 shrink-0 place-items-center text-muted-foreground">
+        <span className="grid h-5 w-4 shrink-0 place-items-center opacity-70">
           {entry.kind === "directory" ? (
-            <Icon name={expanded ? "ChevronDown" : "ChevronRight"} />
+            <Icon name={expanded ? "ChevronDown" : "ChevronRight"} className="h-3.5 w-3.5" />
           ) : null}
         </span>
         <Icon
@@ -110,15 +120,15 @@ function TreeRow({
               ? expanded
                 ? "FolderOpen"
                 : "Folder"
-              : "File"
+              : getFileIcon(entry.name)
           }
-          className="h-4 w-4 shrink-0 text-muted-foreground"
+          className="h-3.5 w-3.5 shrink-0 opacity-80 aria-selected:opacity-100 aria-selected:text-primary"
           aria-hidden
         />
         <span className="min-w-0 flex-1 truncate">{entry.name}</span>
         <button
           type="button"
-          className="grid h-6 w-6 shrink-0 place-items-center rounded opacity-0 hover:bg-state-hover focus:opacity-100 group-hover:opacity-100"
+          className="grid h-[18px] w-[18px] shrink-0 place-items-center rounded opacity-0 hover:bg-state-hover focus:opacity-100 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-all"
           aria-label={`More actions for ${entry.name}`}
           onClick={(event) => {
             event.stopPropagation();
