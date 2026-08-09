@@ -113,7 +113,7 @@ export function EditorPane({
   return (
     <section className="flex h-full min-h-0 min-w-0 flex-col bg-background">
       {/* TAB BAR */}
-      <div className="flex h-9 shrink-0 items-end bg-muted/30 border-b border-border-seam pr-2 pl-0 relative overflow-x-auto no-scrollbar">
+      <div className="flex h-9 shrink-0 items-end bg-background/50 pr-2 pl-0 relative overflow-x-auto no-scrollbar">
         <div className="flex h-full flex-nowrap shrink-0">
           {tabs.map(tab => {
             const isActive = tab.path === activePath;
@@ -123,8 +123,8 @@ export function EditorPane({
               <div 
                 key={tab.path}
                 onClick={() => onTabSelect(tab.path)}
-                className={`group relative flex h-[35px] max-w-[200px] shrink-0 cursor-pointer items-center gap-2 border-r border-t border-border-seam px-3 text-[13px] transition-colors ${
-                  isActive ? "bg-background text-foreground after:absolute after:left-0 after:top-0 after:h-[2px] after:w-full after:bg-primary" : "bg-muted/30 text-muted-foreground hover:bg-muted"
+                className={`group relative flex h-[35px] max-w-[200px] shrink-0 cursor-pointer items-center gap-2 px-3 text-[13px] transition-colors ${
+                  isActive ? "bg-background text-foreground" : "bg-muted/20 text-muted-foreground hover:bg-muted/40"
                 }`}
               >
                 <Icon name={getFileIconForEditor(name) as any} className="h-3.5 w-3.5 opacity-80" />
@@ -218,7 +218,7 @@ export function EditorPane({
 
       {/* BREADCRUMB / ACTIONS (Optional secondary bar, for Markdown/HTML toggle) */}
       {file !== null && (markdown || isHtml) && file.state === "text" ? (
-        <div className="flex h-9 shrink-0 items-center justify-between border-b border-border-seam px-2 bg-background">
+        <div className="flex h-9 shrink-0 items-center justify-between px-2 bg-background">
           <div className="flex min-w-0 items-center gap-2">
             {isHtml ? (
               <Button
@@ -342,7 +342,7 @@ export function EditorPane({
               />
             )}
           </div>
-          <div className="flex h-6 shrink-0 items-center justify-between border-t border-border-seam bg-muted/10 px-3 text-[11px] text-muted-foreground select-none">
+          <div className="flex h-6 shrink-0 items-center justify-between bg-background px-3 text-[11px] text-muted-foreground select-none">
             <div className="flex items-center gap-3">
               {file.state === "text" ? (
                 <span className="flex items-center gap-1.5">
