@@ -48,6 +48,7 @@ const bbEditorTheme = EditorView.theme({
     color: "var(--muted-foreground)",
     backgroundColor: "var(--background)",
     borderRight: "none",
+    opacity: 0.5,
   },
   ".cm-activeLine, .cm-activeLineGutter": {
     backgroundColor: "var(--state-hover)",
