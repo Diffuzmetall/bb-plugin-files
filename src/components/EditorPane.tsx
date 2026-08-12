@@ -117,9 +117,10 @@ export function EditorPane({
   return (
     <section className="flex h-full min-h-0 min-w-0 flex-col bg-background">
       {/* TAB BAR */}
-      <div className="relative flex h-8 shrink-0 items-center overflow-x-auto bg-background/50 pr-1.5 no-scrollbar">
-        <div className="flex h-full shrink-0 flex-nowrap items-center">
-          {tabs.map(tab => {
+      <div className="relative flex h-8 shrink-0 items-center overflow-hidden bg-background/50">
+        <div className="flex h-full min-w-0 flex-1 items-center overflow-x-auto no-scrollbar">
+          <div className="flex h-full shrink-0 flex-nowrap items-center">
+            {tabs.map(tab => {
             const isActive = tab.path === activePath;
             const tabIsDirty = tab.file?.state === "text" && tab.draftText !== tab.savedText;
             const name = tab.path.split("/").pop() || "";
@@ -154,13 +155,12 @@ export function EditorPane({
                   <div className="absolute right-3.5 h-2 w-2 rounded-full bg-foreground opacity-100 group-hover:opacity-0 transition-opacity pointer-events-none" />
                 )}
               </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
 
-        <div className="flex-1" />
-
-        <div className="flex h-full shrink-0 items-center gap-0.5">
+        <div className="flex h-full shrink-0 items-center gap-0.5 border-l border-border-seam bg-background/50 px-1">
           {isHtml && file?.state === "text" ? (
             <Button
               size="icon"
@@ -242,15 +242,6 @@ export function EditorPane({
                 }}
               >
                 <Icon name={copied ? "Check" : "Copy"} className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-6 w-6 text-muted-foreground hover:text-foreground"
-                aria-label="Reload file"
-                onClick={() => onReload(activePath!)}
-              >
-                <Icon name="RotateCcw" className="h-3.5 w-3.5" />
               </Button>
             </>
           ) : null}
