@@ -167,14 +167,16 @@ export function FilesPanel({ threadId }: PluginThreadPanelProps) {
           {isSidebarOpen && (
             <>
               <div
-                className="w-1 cursor-col-resize hover:bg-state-hover active:bg-state-active bg-border-seam shrink-0 transition-colors z-10"
+                className="group relative z-10 -mx-[5px] w-[11px] shrink-0 cursor-col-resize touch-none bg-transparent"
                 onPointerDown={startResizing}
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}
                 onPointerCancel={onPointerUp}
-              />
+              >
+                <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border-seam transition-colors group-hover:bg-state-hover" />
+              </div>
               <div 
-                className="h-full shrink-0 border-l border-border-seam" 
+                className="h-full shrink-0"
                 style={{ width: `${sidebarWidth}px`, minWidth: '150px' }}
               >
                 {tree}
