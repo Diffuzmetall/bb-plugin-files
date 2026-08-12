@@ -83,6 +83,7 @@ export const filesRpcContract = defineRpcContract({
         rootName: z.string().min(1),
         entries: z.array(treeEntrySchema),
         truncated: z.boolean(),
+        annotateAvailable: z.boolean(),
       })
       .strict(),
   },

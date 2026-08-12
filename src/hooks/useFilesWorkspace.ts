@@ -98,6 +98,7 @@ export function useFilesWorkspace(threadId: string) {
   const [treeLoading, setTreeLoading] = useState(true);
   const [treeError, setTreeError] = useState<string | null>(null);
   const [truncated, setTruncated] = useState(false);
+  const [annotateAvailable, setAnnotateAvailable] = useState(false);
 
   const [initialWorkspace] = useState(() => loadStoredWorkspace(threadId));
   const [tabs, setTabs] = useState<TabState[]>(() =>
@@ -191,6 +192,7 @@ export function useFilesWorkspace(threadId: string) {
         setRootName(result.rootName);
         setEntries(result.entries);
         setTruncated(result.truncated);
+        setAnnotateAvailable(result.annotateAvailable === true);
         setTreeError(null);
         return true;
       } catch (error) {
@@ -535,6 +537,7 @@ export function useFilesWorkspace(threadId: string) {
     () => ({
       tabs,
       activePath,
+      annotateAvailable,
       setActivePath,
       closeFile,
       createDirectory,
@@ -562,6 +565,7 @@ export function useFilesWorkspace(threadId: string) {
     [
       tabs,
       activePath,
+      annotateAvailable,
       closeFile,
       createDirectory,
       createFile,

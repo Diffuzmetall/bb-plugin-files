@@ -92,6 +92,7 @@ describe("Files plugin app", () => {
     expect((await view.findByTestId("native-markdown")).textContent).toBe(
       "# Project",
     );
+    expect(view.queryByRole("button", { name: "Open in Annotate" })).toBeNull();
   });
 
   it("reopens markdown with the preferred BB file viewer", async () => {
@@ -110,6 +111,7 @@ describe("Files plugin app", () => {
           },
         ],
         truncated: false,
+        annotateAvailable: true,
       }),
       readFile: () => ({
         state: "text",

@@ -135,6 +135,7 @@ export function FilesPanel({ threadId }: PluginThreadPanelProps) {
       rootName={workspace.rootName}
       selectedPath={workspace.activePath}
       setQuery={workspace.setQuery}
+      showAnnotate={workspace.annotateAvailable}
       truncated={workspace.truncated}
     />
   );
@@ -151,6 +152,7 @@ export function FilesPanel({ threadId }: PluginThreadPanelProps) {
       onSave={(path) => void workspace.save(path)}
       onDownload={(path) => void workspace.downloadPath(path)}
       onOpenInAnnotate={openInAnnotate}
+      showAnnotate={workspace.annotateAvailable}
       onToggleSidebar={() => setIsSidebarOpen((prev) => !prev)}
       isSidebarOpen={isSidebarOpen}
       getDownloadUrl={workspace.getDownloadUrl}

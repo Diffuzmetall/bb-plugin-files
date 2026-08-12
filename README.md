@@ -19,6 +19,7 @@ A standalone BB plugin that adds **Actions → Files** to every thread. The pane
 - SHA-based compare-and-swap with explicit Reload/Overwrite conflict handling;
 - 10-second tree/file external-change polling;
 - create, rename (safely preserves unsaved drafts), duplicate, recursive delete, copy file content, copy relative path, and **download** actions;
+- optional **MD Annotate integration** for opening Markdown files in a review/commenting tab;
 - narrow panel navigation with a Back control;
 - symlinks and `node_modules` remain excluded by BB's host lister.
 
@@ -33,6 +34,41 @@ bb plugin install "$PWD" --yes
 ```
 
 Then open a thread and choose **New tab → Actions → Files** in its right panel. During development, run `bb plugin dev "$PWD"`.
+
+## MD Annotate integration
+
+BB Files integrates optionally with
+[`DarrenTsung/bb-plugin-md-annotate`](https://github.com/DarrenTsung/bb-plugin-md-annotate),
+a Google Docs-style review surface for Markdown files.
+
+When a compatible, running `md-annotate` plugin is detected, Markdown files
+receive two additional actions:
+
+- a comment icon in the active file toolbar;
+- **Open in Annotate** in the file context menu.
+
+The actions are hidden when MD Annotate is not installed, disabled, failed, or
+frontend-incompatible. BB Files does not import, modify, or control MD Annotate;
+it asks BB to reopen the selected workspace file using the client's configured
+file opener.
+
+### Compatibility and setup
+
+- BB `>=0.35.1` with Plugin SDK `^0.4.1`;
+- MD Annotate `0.1.x` with plugin id `md-annotate` and opener id `annotate`;
+- `.md`, `.mdx`, and `.markdown` workspace files;
+- in **Settings → File openers**, set the Markdown extension you use to
+  **Annotate (md-annotate)**.
+
+Install MD Annotate separately:
+
+```bash
+bb plugin install git:https://github.com/DarrenTsung/bb-plugin-md-annotate@main
+```
+
+The integration intentionally uses BB's standard file-open flow. Consequently,
+if Annotate is installed but is not the configured default for that extension,
+the action opens whichever viewer the client selected instead.
 
 ## Hand-off / Current Status
 
