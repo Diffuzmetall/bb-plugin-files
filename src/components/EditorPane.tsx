@@ -165,8 +165,8 @@ export function EditorPane({
   return (
     <section className="flex h-full min-h-0 min-w-0 flex-col bg-background">
       {/* TAB BAR */}
-      <div className="flex h-9 shrink-0 items-end bg-background/50 pr-2 pl-0 relative overflow-x-auto no-scrollbar">
-        <div className="flex h-full flex-nowrap shrink-0">
+      <div className="relative flex h-8 shrink-0 items-center overflow-x-auto bg-background/50 pr-1.5 no-scrollbar">
+        <div className="flex h-full shrink-0 flex-nowrap items-center">
           {tabs.map(tab => {
             const isActive = tab.path === activePath;
             const tabIsDirty = tab.file?.state === "text" && tab.draftText !== tab.savedText;
@@ -175,7 +175,7 @@ export function EditorPane({
               <div 
                 key={tab.path}
                 onClick={() => onTabSelect(tab.path)}
-                className={`group relative flex h-[35px] max-w-[200px] shrink-0 cursor-pointer items-center gap-2 px-3 text-[13px] transition-colors ${
+                className={`group relative flex h-[30px] max-w-[200px] shrink-0 cursor-pointer items-center gap-1.5 px-2.5 text-xs transition-colors ${
                   isActive ? "bg-background text-foreground" : "bg-muted/20 text-muted-foreground hover:bg-muted/40"
                 }`}
               >
@@ -188,13 +188,13 @@ export function EditorPane({
                     e.stopPropagation();
                     onTabClose(tab.path);
                   }}
-                  className="grid h-[18px] w-[18px] shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-muted-foreground/20 hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="grid h-4 w-4 shrink-0 place-items-center rounded-sm text-muted-foreground opacity-0 transition-opacity hover:bg-muted-foreground/20 hover:text-foreground group-hover:opacity-100"
                   aria-label="Close file"
                 >
                   {tabIsDirty ? (
                     <div className="h-2 w-2 rounded-full bg-foreground opacity-100" />
                   ) : (
-                    <Icon name="X" className="h-[14px] w-[14px]" />
+                    <Icon name="X" className="h-3 w-3" />
                   )}
                 </button>
                 {/* Always show dirty dot when not hovered */}
@@ -208,7 +208,7 @@ export function EditorPane({
 
         <div className="flex-1" />
 
-        <div className="flex h-full items-center gap-1 pb-1 shrink-0">
+        <div className="flex h-full shrink-0 items-center gap-0.5">
           {file !== null ? (
             <>
               <Button
@@ -218,7 +218,7 @@ export function EditorPane({
                 aria-label="Download file"
                 onClick={() => onDownload(activePath!)}
               >
-                <Icon name="Download" className="h-4 w-4" />
+                <Icon name="Download" className="h-3.5 w-3.5" />
               </Button>
               <Button
                 size="icon"
@@ -237,7 +237,7 @@ export function EditorPane({
                   }
                 }}
               >
-                <Icon name={copied ? "Check" : "Copy"} className="h-4 w-4" />
+                <Icon name={copied ? "Check" : "Copy"} className="h-3.5 w-3.5" />
               </Button>
               <Button
                 size="icon"
@@ -246,7 +246,7 @@ export function EditorPane({
                 aria-label="Reload file"
                 onClick={() => onReload(activePath!)}
               >
-                <Icon name="RotateCcw" className="h-4 w-4" />
+                <Icon name="RotateCcw" className="h-3.5 w-3.5" />
               </Button>
             </>
           ) : null}
