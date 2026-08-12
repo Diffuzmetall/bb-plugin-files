@@ -23,10 +23,12 @@ export function FileContextMenu({
   children,
   entry,
   onAction,
+  showAnnotate,
 }: {
   children: ReactNode;
   entry: FileTreeEntry;
   onAction(action: FileAction, entry: FileTreeEntry): void;
+  showAnnotate: boolean;
 }) {
   return (
     <ContextMenu>
@@ -46,7 +48,7 @@ export function FileContextMenu({
           </>
         ) : (
           <>
-            {/\.(?:md|mdx|markdown)$/iu.test(entry.path) ? (
+            {showAnnotate && /\.(?:md|mdx|markdown)$/iu.test(entry.path) ? (
               <ContextMenuItem onSelect={() => onAction("annotate", entry)}>
                 <Icon name="MessageSquare" /> Open in Annotate
               </ContextMenuItem>

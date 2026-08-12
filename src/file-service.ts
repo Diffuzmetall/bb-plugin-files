@@ -118,10 +118,17 @@ export function createFileService(bb: BbPluginApi) {
         );
       }
 
+      const { plugins } = await bb.sdk.plugins.list();
+      const annotate = plugins.find((plugin) => plugin.id === "md-annotate");
+
       return {
         rootName: projectBasename(environment.rootPath),
         entries,
         truncated: result.truncated,
+        annotateAvailable:
+          annotate?.status === "running" &&
+          annotate.app.hasApp &&
+          annotate.app.bundle?.compatible === true,
       };
     },
 

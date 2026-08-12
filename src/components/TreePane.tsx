@@ -66,6 +66,7 @@ function TreeRow({
   onAction,
   onOpen,
   onToggle,
+  showAnnotate,
 }: {
   entry: FileTreeEntry;
   expanded: boolean;
@@ -73,12 +74,17 @@ function TreeRow({
   onAction(action: FileAction, entry: FileTreeEntry): void;
   onOpen(path: string): void;
   onToggle(path: string): void;
+  showAnnotate: boolean;
 }) {
   const longPress = useLongPressContextMenu();
   const open = () =>
     entry.kind === "directory" ? onToggle(entry.path) : onOpen(entry.path);
   return (
-    <FileContextMenu entry={entry} onAction={onAction}>
+    <FileContextMenu
+      entry={entry}
+      onAction={onAction}
+      showAnnotate={showAnnotate}
+    >
       <div
         role="treeitem"
         aria-expanded={entry.kind === "directory" ? expanded : undefined}
@@ -161,6 +167,7 @@ export function TreePane({
   rootName,
   selectedPath,
   setQuery,
+  showAnnotate,
   truncated,
 }: {
   entries: FileTreeEntry[];
@@ -174,6 +181,7 @@ export function TreePane({
   rootName: string;
   selectedPath: string | null;
   setQuery(value: string): void;
+  showAnnotate: boolean;
   truncated: boolean;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -286,6 +294,7 @@ export function TreePane({
               selected={selectedPath === entry.path}
               onAction={onAction}
               onOpen={onOpen}
+              showAnnotate={showAnnotate}
               onToggle={(path) =>
                 setExpanded((current) => {
                   const next = new Set(current);

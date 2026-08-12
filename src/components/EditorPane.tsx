@@ -61,6 +61,7 @@ export function EditorPane({
   onSave,
   onDownload,
   onOpenInAnnotate,
+  showAnnotate,
   onToggleSidebar,
   isSidebarOpen,
   getDownloadUrl,
@@ -76,6 +77,7 @@ export function EditorPane({
   onSave(path: string): void;
   onDownload(path: string): void;
   onOpenInAnnotate(path: string): void;
+  showAnnotate: boolean;
   onToggleSidebar?(): void;
   isSidebarOpen?: boolean;
   getDownloadUrl(path: string): Promise<string>;
@@ -202,7 +204,7 @@ export function EditorPane({
           ) : null}
           {file !== null ? (
             <>
-              {markdown ? (
+              {markdown && showAnnotate ? (
                 <Button
                   size="icon"
                   variant="ghost"
