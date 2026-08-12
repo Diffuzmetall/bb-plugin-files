@@ -242,15 +242,15 @@ export function TreePane({
           <Icon name="FolderPlus" className="h-3.5 w-3.5" />
         </Button>
       </div>
-      <div className="relative shrink-0 p-2">
+      <div className="group relative mx-1 my-1 shrink-0 rounded-sm transition-colors hover:bg-state-hover focus-within:bg-state-hover">
         <Icon
           name="Search"
-          className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+          className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
           aria-hidden
         />
         <Input
           aria-label="Search project files"
-          className="h-8 pl-8 text-sm"
+          className="h-7 rounded-none border-0 bg-transparent py-0 pl-7 pr-2 text-xs shadow-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
           placeholder="Search files"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
