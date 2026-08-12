@@ -60,6 +60,7 @@ export function EditorPane({
   onReload,
   onSave,
   onDownload,
+  onOpenInAnnotate,
   onToggleSidebar,
   isSidebarOpen,
   getDownloadUrl,
@@ -74,6 +75,7 @@ export function EditorPane({
   onReload(path: string): void;
   onSave(path: string): void;
   onDownload(path: string): void;
+  onOpenInAnnotate(path: string): void;
   onToggleSidebar?(): void;
   isSidebarOpen?: boolean;
   getDownloadUrl(path: string): Promise<string>;
@@ -200,6 +202,17 @@ export function EditorPane({
           ) : null}
           {file !== null ? (
             <>
+              {markdown ? (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                  aria-label="Open in Annotate"
+                  onClick={() => onOpenInAnnotate(activePath!)}
+                >
+                  <Icon name="MessageSquare" className="h-3.5 w-3.5" />
+                </Button>
+              ) : null}
               <Button
                 size="icon"
                 variant="ghost"

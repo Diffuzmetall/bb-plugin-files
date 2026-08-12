@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FilesPanel } from "./app";
 import {
   getCapturedPluginApp,
+  getFileOpenerCalls,
   setRpcHandlers,
 } from "./test/plugin-sdk-app-runtime";
 
@@ -92,6 +93,50 @@ describe("Files plugin app", () => {
     expect((await view.findByTestId("native-markdown")).textContent).toBe(
       "# Project",
     );
+  });
+
+  it("opens markdown in MD Annotate from the editor toolbar", async () => {
+    setRpcHandlers({
+      listTree: () => ({
+        rootName: "repo",
+        entries: [
+          {
+            kind: "file",
+            path: "README.md",
+            name: "README.md",
+            score: 0,
+            positions: [],
+          },
+        ],
+        truncated: false,
+      }),
+      readFile: () => ({
+        state: "text",
+        path: "README.md",
+        sha256: "sha-1",
+        sizeBytes: 9,
+        mimeType: "text/markdown",
+        modifiedAtMs: 1,
+        content: "# Project",
+      }),
+    });
+    const view = render(<FilesPanel threadId="thread-1" params={null} />);
+
+    fireEvent.click(
+      await view.findByRole("treeitem", { name: /README\.md/ }),
+    );
+    fireEvent.click(
+      await view.findByRole("button", { name: "Open in Annotate" }),
+    );
+
+    expect(getFileOpenerCalls()).toEqual([
+      {
+        pluginId: "md-annotate",
+        openerId: "annotate",
+        path: "README.md",
+        source: "workspace",
+      },
+    ]);
   });
 
   it("restores open tabs after the Files panel remounts", async () => {
