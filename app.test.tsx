@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FilesPanel } from "./app";
 import {
   getCapturedPluginApp,
-  getFileOpenerCalls,
   setRpcHandlers,
 } from "./test/plugin-sdk-app-runtime";
 
@@ -95,8 +94,10 @@ describe("Files plugin app", () => {
     );
   });
 
-  it("opens markdown in MD Annotate from the editor toolbar", async () => {
+  it("reopens markdown with the preferred BB file viewer", async () => {
+    const openFile = vi.fn(() => ({ delivered: 1 }));
     setRpcHandlers({
+      openFile,
       listTree: () => ({
         rootName: "repo",
         entries: [
@@ -129,14 +130,10 @@ describe("Files plugin app", () => {
       await view.findByRole("button", { name: "Open in Annotate" }),
     );
 
-    expect(getFileOpenerCalls()).toEqual([
-      {
-        pluginId: "md-annotate",
-        openerId: "annotate",
-        path: "README.md",
-        source: "workspace",
-      },
-    ]);
+    expect(openFile).toHaveBeenCalledWith({
+      threadId: "thread-1",
+      path: "README.md",
+    });
   });
 
   it("restores open tabs after the Files panel remounts", async () => {

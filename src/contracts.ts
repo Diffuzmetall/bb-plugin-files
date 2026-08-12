@@ -92,6 +92,12 @@ export const filesRpcContract = defineRpcContract({
       .strict(),
     output: readFileResultSchema,
   },
+  openFile: {
+    input: z
+      .object({ threadId: threadIdSchema, path: targetPathSchema })
+      .strict(),
+    output: z.object({ delivered: z.number().int().nonnegative() }).strict(),
+  },
   saveFile: {
     input: z
       .object({
