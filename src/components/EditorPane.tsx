@@ -1,12 +1,6 @@
 import { useEffect, useState } from "react";
 import { Markdown } from "@bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
 import { Icon } from "@/components/ui/icon";
 import { CodeEditor } from "./CodeEditor";
 import type { SaveState, TabState } from "../hooks/useFilesWorkspace";
@@ -19,52 +13,6 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
-}
-
-function FileBreadcrumb({ path }: { path: string }) {
-  const segments = path.split("/").filter(Boolean);
-
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <nav
-          aria-label="File path"
-          className="flex min-w-0 flex-1 items-center overflow-x-auto text-xs text-muted-foreground no-scrollbar"
-          title={path}
-        >
-          {segments.map((segment, index) => (
-            <span key={`${segment}-${index}`} className="flex shrink-0 items-center">
-              {index > 0 ? (
-                <Icon
-                  name="ChevronRight"
-                  className="mx-0.5 h-3 w-3 shrink-0 opacity-50"
-                  aria-hidden
-                />
-              ) : null}
-              <span
-                className={
-                  index === segments.length - 1
-                    ? "font-medium text-foreground"
-                    : undefined
-                }
-              >
-                {segment}
-              </span>
-            </span>
-          ))}
-        </nav>
-      </ContextMenuTrigger>
-      <ContextMenuContent className="w-44">
-        <ContextMenuItem
-          onSelect={() =>
-            void navigator.clipboard.writeText(path).catch(() => undefined)
-          }
-        >
-          <Icon name="Copy" /> Copy relative path
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
-  );
 }
 
 function SaveLabel({ state, dirty }: { state: SaveState; dirty: boolean }) {
@@ -164,54 +112,6 @@ export function EditorPane({
 
   return (
     <section className="flex h-full min-h-0 min-w-0 flex-col bg-background">
-      {/* FILE PATH / PREVIEW ACTIONS */}
-      {file !== null ? (
-        <div className="flex h-9 shrink-0 items-center gap-2 bg-background px-3">
-          <FileBreadcrumb path={file.path} />
-          {isHtml && file.state === "text" ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-6 shrink-0 px-2 text-xs text-muted-foreground hover:text-foreground"
-              disabled={!previewSrc}
-              onClick={() => {
-                if (!previewSrc) return;
-                window.open(previewSrc, "_blank", "noopener,noreferrer");
-              }}
-            >
-              <Icon name="ExternalLink" className="mr-1.5 h-3.5 w-3.5" />
-              Open preview
-            </Button>
-          ) : null}
-          {(markdown || isHtml) && file.state === "text" ? (
-            <div
-              className="flex shrink-0 rounded-md border border-input p-0.5"
-              role="group"
-              aria-label="View mode"
-            >
-              <Button
-                size="sm"
-                variant={mode === "preview" ? "secondary" : "ghost"}
-                className="h-6 px-3 text-xs"
-                aria-pressed={mode === "preview"}
-                onClick={() => setMode("preview")}
-              >
-                Preview
-              </Button>
-              <Button
-                size="sm"
-                variant={mode === "raw" ? "secondary" : "ghost"}
-                className="h-6 px-3 text-xs"
-                aria-pressed={mode === "raw"}
-                onClick={() => setMode("raw")}
-              >
-                Raw
-              </Button>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
       {/* TAB BAR */}
       <div className="relative flex h-8 shrink-0 items-center overflow-x-auto bg-background/50 pr-1.5 no-scrollbar">
         <div className="flex h-full shrink-0 flex-nowrap items-center">
@@ -257,6 +157,47 @@ export function EditorPane({
         <div className="flex-1" />
 
         <div className="flex h-full shrink-0 items-center gap-0.5">
+          {isHtml && file?.state === "text" ? (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-6 w-6 text-muted-foreground hover:text-foreground"
+              aria-label="Open preview"
+              disabled={!previewSrc}
+              onClick={() => {
+                if (!previewSrc) return;
+                window.open(previewSrc, "_blank", "noopener,noreferrer");
+              }}
+            >
+              <Icon name="ExternalLink" className="h-3.5 w-3.5" />
+            </Button>
+          ) : null}
+          {(markdown || isHtml) && file?.state === "text" ? (
+            <div
+              className="mr-0.5 flex shrink-0 rounded border border-input p-px"
+              role="group"
+              aria-label="View mode"
+            >
+              <Button
+                size="sm"
+                variant={mode === "preview" ? "secondary" : "ghost"}
+                className="h-5 rounded-sm px-2 text-[11px]"
+                aria-pressed={mode === "preview"}
+                onClick={() => setMode("preview")}
+              >
+                Preview
+              </Button>
+              <Button
+                size="sm"
+                variant={mode === "raw" ? "secondary" : "ghost"}
+                className="h-5 rounded-sm px-2 text-[11px]"
+                aria-pressed={mode === "raw"}
+                onClick={() => setMode("raw")}
+              >
+                Raw
+              </Button>
+            </div>
+          ) : null}
           {file !== null ? (
             <>
               <Button
