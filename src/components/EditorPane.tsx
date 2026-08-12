@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { Markdown } from "@bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { Icon } from "@/components/ui/icon";
 import { CodeEditor } from "./CodeEditor";
 import type { SaveState, TabState } from "../hooks/useFilesWorkspace";
@@ -13,6 +19,52 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
+}
+
+function FileBreadcrumb({ path }: { path: string }) {
+  const segments = path.split("/").filter(Boolean);
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <nav
+          aria-label="File path"
+          className="flex min-w-0 flex-1 items-center overflow-x-auto text-xs text-muted-foreground no-scrollbar"
+          title={path}
+        >
+          {segments.map((segment, index) => (
+            <span key={`${segment}-${index}`} className="flex shrink-0 items-center">
+              {index > 0 ? (
+                <Icon
+                  name="ChevronRight"
+                  className="mx-0.5 h-3 w-3 shrink-0 opacity-50"
+                  aria-hidden
+                />
+              ) : null}
+              <span
+                className={
+                  index === segments.length - 1
+                    ? "font-medium text-foreground"
+                    : undefined
+                }
+              >
+                {segment}
+              </span>
+            </span>
+          ))}
+        </nav>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-44">
+        <ContextMenuItem
+          onSelect={() =>
+            void navigator.clipboard.writeText(path).catch(() => undefined)
+          }
+        >
+          <Icon name="Copy" /> Copy relative path
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
 }
 
 function SaveLabel({ state, dirty }: { state: SaveState; dirty: boolean }) {
@@ -216,46 +268,51 @@ export function EditorPane({
         </div>
       </div>
 
-      {/* BREADCRUMB / ACTIONS (Optional secondary bar, for Markdown/HTML toggle) */}
-      {file !== null && (markdown || isHtml) && file.state === "text" ? (
-        <div className="flex h-9 shrink-0 items-center justify-between px-2 bg-background">
-          <div className="flex min-w-0 items-center gap-2">
-            {isHtml ? (
+      {/* FILE PATH / PREVIEW ACTIONS */}
+      {file !== null ? (
+        <div className="flex h-9 shrink-0 items-center gap-2 bg-background px-3">
+          <FileBreadcrumb path={file.path} />
+          {isHtml && file.state === "text" ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 shrink-0 px-2 text-xs text-muted-foreground hover:text-foreground"
+              disabled={!previewSrc}
+              onClick={() => {
+                if (!previewSrc) return;
+                window.open(previewSrc, "_blank", "noopener,noreferrer");
+              }}
+            >
+              <Icon name="ExternalLink" className="mr-1.5 h-3.5 w-3.5" />
+              Open preview
+            </Button>
+          ) : null}
+          {(markdown || isHtml) && file.state === "text" ? (
+            <div
+              className="flex shrink-0 rounded-md border border-input p-0.5"
+              role="group"
+              aria-label="View mode"
+            >
               <Button
                 size="sm"
-                variant="ghost"
-                className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
-                disabled={!previewSrc}
-                onClick={() => {
-                  if (!previewSrc) return;
-                  window.open(previewSrc, "_blank", "noopener,noreferrer");
-                }}
+                variant={mode === "preview" ? "secondary" : "ghost"}
+                className="h-6 px-3 text-xs"
+                aria-pressed={mode === "preview"}
+                onClick={() => setMode("preview")}
               >
-                <Icon name="ExternalLink" className="mr-1.5 h-3.5 w-3.5" />
-                Open preview
+                Preview
               </Button>
-            ) : null}
-          </div>
-          <div className="flex rounded-md border border-input p-0.5" role="group" aria-label="View mode">
-            <Button
-              size="sm"
-              variant={mode === "preview" ? "secondary" : "ghost"}
-              className="h-6 px-3 text-xs"
-              aria-pressed={mode === "preview"}
-              onClick={() => setMode("preview")}
-            >
-              Preview
-            </Button>
-            <Button
-              size="sm"
-              variant={mode === "raw" ? "secondary" : "ghost"}
-              className="h-6 px-3 text-xs"
-              aria-pressed={mode === "raw"}
-              onClick={() => setMode("raw")}
-            >
-              Raw
-            </Button>
-          </div>
+              <Button
+                size="sm"
+                variant={mode === "raw" ? "secondary" : "ghost"}
+                className="h-6 px-3 text-xs"
+                aria-pressed={mode === "raw"}
+                onClick={() => setMode("raw")}
+              >
+                Raw
+              </Button>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
