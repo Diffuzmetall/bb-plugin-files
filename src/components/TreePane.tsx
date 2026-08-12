@@ -209,37 +209,37 @@ export function TreePane({
 
   return (
     <aside className="flex h-full min-h-0 min-w-0 flex-col bg-background">
-      <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border-seam px-2">
-        <Icon name="FolderOpen" className="h-4 w-4" aria-hidden />
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+      <div className="flex h-[34px] shrink-0 items-center gap-0.5 border-b border-border-seam px-1.5">
+        <Icon name="FolderOpen" className="h-3.5 w-3.5" aria-hidden />
+        <span className="min-w-0 flex-1 truncate text-xs font-medium">
           {rootName}
         </span>
         <Button
           size="icon"
           variant="ghost"
-          className="h-8 w-8"
+          className="h-[26px] w-[26px]"
           aria-label="Refresh files"
           onClick={onRefresh}
         >
-          <Icon name="RotateCcw" />
+          <Icon name="RotateCcw" className="h-3.5 w-3.5" />
         </Button>
         <Button
           size="icon"
           variant="ghost"
-          className="h-8 w-8"
+          className="h-[26px] w-[26px]"
           aria-label="New file"
           onClick={() => onCreateRoot("file")}
         >
-          <Icon name="File" />
+          <Icon name="File" className="h-3.5 w-3.5" />
         </Button>
         <Button
           size="icon"
           variant="ghost"
-          className="h-8 w-8"
+          className="h-[26px] w-[26px]"
           aria-label="New folder"
           onClick={() => onCreateRoot("directory")}
         >
-          <Icon name="FolderPlus" />
+          <Icon name="FolderPlus" className="h-3.5 w-3.5" />
         </Button>
       </div>
       <div className="relative shrink-0 p-2">
