@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FilesPanel } from "./app";
+import { EditorPane } from "./src/components/EditorPane";
 import {
   getCapturedPluginApp,
   setRpcHandlers,
@@ -92,6 +93,52 @@ describe("Files plugin app", () => {
     expect((await view.findByTestId("native-markdown")).textContent).toBe(
       "# Project",
     );
+  });
+
+  it("shows the selected file path as breadcrumbs and copies it from the context menu", async () => {
+    const path = "src/components/README.md";
+    const clipboard = vi.mocked(navigator.clipboard.writeText);
+    const view = render(
+      <EditorPane
+        tabs={[
+          {
+            path,
+            file: {
+              state: "text",
+              path,
+              sha256: "sha-1",
+              sizeBytes: 10,
+              mimeType: "text/markdown",
+              modifiedAtMs: 1,
+              content: "# Editor",
+            },
+            loading: false,
+            draftText: "# Editor",
+            savedText: "# Editor",
+            saveState: { kind: "saved" },
+          },
+        ]}
+        activePath={path}
+        narrow={false}
+        onTabSelect={() => undefined}
+        onTabClose={() => undefined}
+        onChange={() => undefined}
+        onOverwrite={() => undefined}
+        onReload={() => undefined}
+        onSave={() => undefined}
+        onDownload={() => undefined}
+        getDownloadUrl={async () => ""}
+      />,
+    );
+
+    const breadcrumbs = view.getByRole("navigation", { name: "File path" });
+    expect(breadcrumbs.textContent).toBe("srccomponentsREADME.md");
+
+    fireEvent.contextMenu(breadcrumbs);
+    fireEvent.click(
+      await view.findByRole("menuitem", { name: "Copy relative path" }),
+    );
+    await waitFor(() => expect(clipboard).toHaveBeenCalledWith(path));
   });
 
   it("restores open tabs after the Files panel remounts", async () => {
