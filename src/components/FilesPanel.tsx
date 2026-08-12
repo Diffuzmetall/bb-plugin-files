@@ -1,8 +1,5 @@
 import { useState, useRef } from "react";
-import {
-  useBbNavigate,
-  type PluginThreadPanelProps,
-} from "@bb/plugin-sdk/app";
+import type { PluginThreadPanelProps } from "@bb/plugin-sdk/app";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -44,7 +41,6 @@ function duplicateSuggestion(entry: FileTreeEntry): string {
 }
 
 export function FilesPanel({ threadId }: PluginThreadPanelProps) {
-  const navigate = useBbNavigate();
   const workspace = useFilesWorkspace(threadId);
   const { containerRef, containerNode, isNarrow } = useResponsiveLayout();
   const [operation, setOperation] = useState<OperationRequest | null>(null);
@@ -94,12 +90,7 @@ export function FilesPanel({ threadId }: PluginThreadPanelProps) {
   };
 
   const openInAnnotate = (path: string) =>
-    navigate.experimental_openFileOpener?.({
-      pluginId: "md-annotate",
-      openerId: "annotate",
-      path,
-      source: "workspace",
-    });
+    void workspace.openInPreferredViewer(path);
 
   const handleAction = (action: FileAction, entry: FileTreeEntry) => {
     if (action === "annotate") {

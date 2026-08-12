@@ -170,6 +170,14 @@ export function useFilesWorkspace(threadId: string) {
     });
   }, [rpc, tabs, threadId]);
 
+  const openInPreferredViewer = useCallback(
+    async (path: string) => {
+      const result = await rpc.call("openFile", { threadId, path });
+      return result.delivered > 0;
+    },
+    [rpc, threadId],
+  );
+
   const refreshTree = useCallback(
     async (nextQuery = query, silent = false) => {
       const request = ++treeRequestRef.current;
@@ -538,6 +546,7 @@ export function useFilesWorkspace(threadId: string) {
       entries,
       movePath,
       openPath,
+      openInPreferredViewer,
       overwrite,
       query,
       refreshTree: () => refreshTree(query),
@@ -563,6 +572,7 @@ export function useFilesWorkspace(threadId: string) {
       entries,
       movePath,
       openPath,
+      openInPreferredViewer,
       overwrite,
       query,
       refreshTree,

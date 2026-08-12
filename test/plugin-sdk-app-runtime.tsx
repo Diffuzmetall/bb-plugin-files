@@ -10,21 +10,15 @@ interface ThreadPanelRegistration {
 }
 
 const captured = { threadPanelActions: [] as ThreadPanelRegistration[] };
-const fileOpenerCalls: unknown[] = [];
 let rpcHandlers: Record<string, (input: unknown) => unknown> = {};
 
 export function resetPluginRuntime() {
   captured.threadPanelActions.length = 0;
-  fileOpenerCalls.length = 0;
   rpcHandlers = {};
 }
 
 export function getCapturedPluginApp() {
   return captured;
-}
-
-export function getFileOpenerCalls() {
-  return fileOpenerCalls;
 }
 
 export function setRpcHandlers(
@@ -68,15 +62,6 @@ export function Markdown({ content, className }: { content: string; className?: 
 
 export function useBbContext() {
   return { projectId: null, threadId: null };
-}
-
-export function useBbNavigate() {
-  return {
-    experimental_openFileOpener(options: unknown) {
-      fileOpenerCalls.push(options);
-      return true;
-    },
-  };
 }
 
 export function RuntimeProvider({ children }: { children: ReactNode }) {

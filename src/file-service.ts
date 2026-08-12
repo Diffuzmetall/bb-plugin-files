@@ -125,6 +125,18 @@ export function createFileService(bb: BbPluginApi) {
       };
     },
 
+    async openFile({ threadId, path }: { threadId: string; path: string }) {
+      const parsed = parseRelativePath(path, { allowEmpty: false });
+      return bb.sdk.threads.open({
+        threadId,
+        file: {
+          source: "workspace",
+          path: parsed.normalized,
+          lineNumber: null,
+        },
+      });
+    },
+
     async readFile({ threadId, path }: { threadId: string; path: string }) {
       const environment = await target(threadId);
       const resolved = resolveProjectPath(environment.rootPath, path, {
