@@ -160,7 +160,7 @@ export function EditorPane({
           </div>
         </div>
 
-        <div className="flex h-full shrink-0 items-center gap-0.5 border-l border-border-seam bg-background/50 px-1">
+        <div className="relative flex h-full shrink-0 items-center gap-0.5 bg-background px-1 before:pointer-events-none before:absolute before:inset-y-0 before:right-full before:w-4 before:bg-gradient-to-r before:from-transparent before:to-background">
           {isHtml && file?.state === "text" ? (
             <Button
               size="icon"
