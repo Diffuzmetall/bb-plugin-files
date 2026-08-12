@@ -16,7 +16,8 @@ export type FileAction =
   | "duplicate"
   | "delete"
   | "copy-path"
-  | "download";
+  | "download"
+  | "annotate";
 
 export function FileContextMenu({
   children,
@@ -45,6 +46,11 @@ export function FileContextMenu({
           </>
         ) : (
           <>
+            {/\.(?:md|mdx|markdown)$/iu.test(entry.path) ? (
+              <ContextMenuItem onSelect={() => onAction("annotate", entry)}>
+                <Icon name="MessageSquare" /> Open in Annotate
+              </ContextMenuItem>
+            ) : null}
             <ContextMenuItem onSelect={() => onAction("download", entry)}>
               <Icon name="Download" /> Download
             </ContextMenuItem>

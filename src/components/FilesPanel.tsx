@@ -1,5 +1,8 @@
 import { useState, useRef } from "react";
-import type { PluginThreadPanelProps } from "@bb/plugin-sdk/app";
+import {
+  useBbNavigate,
+  type PluginThreadPanelProps,
+} from "@bb/plugin-sdk/app";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -41,6 +44,7 @@ function duplicateSuggestion(entry: FileTreeEntry): string {
 }
 
 export function FilesPanel({ threadId }: PluginThreadPanelProps) {
+  const navigate = useBbNavigate();
   const workspace = useFilesWorkspace(threadId);
   const { containerRef, containerNode, isNarrow } = useResponsiveLayout();
   const [operation, setOperation] = useState<OperationRequest | null>(null);
@@ -89,7 +93,19 @@ export function FilesPanel({ threadId }: PluginThreadPanelProps) {
     });
   };
 
+  const openInAnnotate = (path: string) =>
+    navigate.experimental_openFileOpener?.({
+      pluginId: "md-annotate",
+      openerId: "annotate",
+      path,
+      source: "workspace",
+    });
+
   const handleAction = (action: FileAction, entry: FileTreeEntry) => {
+    if (action === "annotate") {
+      openInAnnotate(entry.path);
+      return;
+    }
     if (action === "copy-path") {
       void navigator.clipboard.writeText(entry.path);
       return;
@@ -143,6 +159,7 @@ export function FilesPanel({ threadId }: PluginThreadPanelProps) {
       onReload={(path) => void workspace.reloadFile(path)}
       onSave={(path) => void workspace.save(path)}
       onDownload={(path) => void workspace.downloadPath(path)}
+      onOpenInAnnotate={openInAnnotate}
       onToggleSidebar={() => setIsSidebarOpen((prev) => !prev)}
       isSidebarOpen={isSidebarOpen}
       getDownloadUrl={workspace.getDownloadUrl}

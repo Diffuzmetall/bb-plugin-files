@@ -1350,6 +1350,20 @@ interface BbNavigate {
         title?: string;
         params?: JsonValue;
     }): boolean;
+    /**
+     * Open a file with a registered plugin file opener in the current thread's
+     * side panel. The host resolves the current thread, environment, and project
+     * into the opener's source metadata. Returns false when the opener is not
+     * registered or the current surface has no thread side panel.
+     *
+     * Experimental: see docs/api_to_audit.md.
+     */
+    experimental_openFileOpener(options: {
+        pluginId: string;
+        openerId: string;
+        path: string;
+        source: PluginFileOpenerSource["kind"];
+    }): boolean;
 }
 /**
  * Everything `@bb/plugin-sdk/app` resolves to at runtime. The BB app builds
