@@ -178,14 +178,14 @@ export function EditorPane({
           ) : null}
           {(markdown || isHtml) && file?.state === "text" ? (
             <div
-              className="mr-0.5 flex shrink-0 rounded border border-input p-px"
+              className="mr-0.5 flex shrink-0 items-center gap-0.5"
               role="group"
               aria-label="View mode"
             >
               <Button
                 size="sm"
-                variant={mode === "preview" ? "secondary" : "ghost"}
-                className="h-5 rounded-sm px-2 text-[11px]"
+                variant="ghost"
+                className="h-[22px] rounded-sm px-2 text-[11px] text-muted-foreground aria-pressed:text-foreground"
                 aria-pressed={mode === "preview"}
                 onClick={() => setMode("preview")}
               >
@@ -193,8 +193,8 @@ export function EditorPane({
               </Button>
               <Button
                 size="sm"
-                variant={mode === "raw" ? "secondary" : "ghost"}
-                className="h-5 rounded-sm px-2 text-[11px]"
+                variant="ghost"
+                className="h-[22px] rounded-sm px-2 text-[11px] text-muted-foreground aria-pressed:text-foreground"
                 aria-pressed={mode === "raw"}
                 onClick={() => setMode("raw")}
               >
