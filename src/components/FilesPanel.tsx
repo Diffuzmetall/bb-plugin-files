@@ -1,5 +1,9 @@
 import { useState, useRef } from "react";
-import { useBbContext, type PluginFileOpenerProps, type PluginThreadPanelProps } from "@bb/plugin-sdk/app";
+import {
+  useBbContext,
+  type PluginFileOpenerProps,
+  type PluginThreadPanelProps,
+} from "@bb/plugin-sdk/app";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,7 +35,8 @@ function childPath(parent: string, name: string): string {
 
 function duplicateSuggestion(entry: FileTreeEntry): string {
   const parent = parentPath(entry.path);
-  if (entry.kind === "directory") return childPath(parent, `${entry.name} copy`);
+  if (entry.kind === "directory")
+    return childPath(parent, `${entry.name} copy`);
   const dot = entry.name.lastIndexOf(".");
   const name =
     dot > 0
@@ -42,28 +47,38 @@ function duplicateSuggestion(entry: FileTreeEntry): string {
 
 type FilesPanelProps = PluginThreadPanelProps | PluginFileOpenerProps;
 
-function isFileOpenerProps(props: FilesPanelProps): props is PluginFileOpenerProps {
+function isFileOpenerProps(
+  props: FilesPanelProps,
+): props is PluginFileOpenerProps {
   return "source" in props;
 }
 
 export function FilesPanel(props: FilesPanelProps) {
   const context = useBbContext();
   const opener = isFileOpenerProps(props);
-  const threadId = opener ? context.threadId ?? "" : props.threadId;
-  const source = opener
-    ? props.source
-    : { kind: "workspace" as const, threadId, environmentId: null, projectId: context.projectId };
-  // The app SDK exposes no active environment id. An opener carrying one is
-  // therefore unauthorized rather than trusted client-side.
-  const compatible = source.kind === "workspace" && source.threadId === (opener ? context.threadId : threadId) && source.projectId === context.projectId && source.environmentId === null;
-  if (!compatible) {
-    return <div className="grid h-full place-items-center p-6 text-sm text-muted-foreground" role="alert">This file source is not available in the active workspace.</div>;
+  // The host context and server-side thread-environment resolution are the
+  // authorization boundary. Opener and panel props are persisted input only.
+  if (context.threadId === null) {
+    return (
+      <div
+        className="grid h-full place-items-center p-6 text-sm text-muted-foreground"
+        role="alert"
+      >
+        This file source is not available in the active workspace.
+      </div>
+    );
   }
-  return <FilesPanelContent key={JSON.stringify(source)} threadId={threadId} source={{ ...source, kind: "workspace" }} initialPath={opener ? props.path : null} />;
+  const sourceKey = JSON.stringify([context.threadId, context.projectId]);
+  return (
+    <FilesPanelContent
+      key={sourceKey}
+      initialPath={opener ? props.path : null}
+    />
+  );
 }
 
-function FilesPanelContent({ threadId, source, initialPath }: { threadId: string; source: { kind: "workspace"; threadId: string | null; environmentId: string | null; projectId: string | null }; initialPath: string | null }) {
-  const workspace = useFilesWorkspace(threadId, source, initialPath, true);
+function FilesPanelContent({ initialPath }: { initialPath: string | null }) {
+  const workspace = useFilesWorkspace(initialPath);
   const { containerRef, containerNode, isNarrow } = useResponsiveLayout();
   const [operation, setOperation] = useState<OperationRequest | null>(null);
   const [deleteEntry, setDeleteEntry] = useState<FileTreeEntry | null>(null);
@@ -90,7 +105,8 @@ function FilesPanelContent({ threadId, source, initialPath }: { threadId: string
         e.currentTarget.releasePointerCapture(e.pointerId);
         return;
       }
-      if (newWidth > containerRect.width - 200) newWidth = containerRect.width - 200;
+      if (newWidth > containerRect.width - 200)
+        newWidth = containerRect.width - 200;
       setSidebarWidth(newWidth);
     }
   };
@@ -106,7 +122,10 @@ function FilesPanelContent({ threadId, source, initialPath }: { threadId: string
     setOperation({
       kind: kind === "file" ? "create-file" : "create-directory",
       sourcePath: null,
-      targetPath: childPath(parent, kind === "file" ? "untitled.txt" : "untitled"),
+      targetPath: childPath(
+        parent,
+        kind === "file" ? "untitled.txt" : "untitled",
+      ),
       entryKind: kind,
     });
   };
@@ -133,7 +152,10 @@ function FilesPanelContent({ threadId, source, initialPath }: { threadId: string
       return;
     }
     if (action === "create-file" || action === "create-directory") {
-      requestCreate(action === "create-file" ? "file" : "directory", entry.path);
+      requestCreate(
+        action === "create-file" ? "file" : "directory",
+        entry.path,
+      );
       return;
     }
     setOperation({
@@ -182,9 +204,16 @@ function FilesPanelContent({ threadId, source, initialPath }: { threadId: string
   );
 
   return (
-    <div ref={containerRef} className="bb-files-panel relative flex h-full min-h-0 min-w-0 overflow-hidden bg-background text-foreground">
+    <div
+      ref={containerRef}
+      className="bb-files-panel relative flex h-full min-h-0 min-w-0 overflow-hidden bg-background text-foreground"
+    >
       {isNarrow ? (
-        workspace.activePath === null ? tree : editor
+        workspace.activePath === null ? (
+          tree
+        ) : (
+          editor
+        )
       ) : (
         <>
           <div className="h-full min-w-0 flex-1">{editor}</div>
@@ -199,9 +228,9 @@ function FilesPanelContent({ threadId, source, initialPath }: { threadId: string
               >
                 <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border-seam transition-colors group-hover:bg-state-hover" />
               </div>
-              <div 
+              <div
                 className="h-full shrink-0"
-                style={{ width: `${sidebarWidth}px`, minWidth: '150px' }}
+                style={{ width: `${sidebarWidth}px`, minWidth: "150px" }}
               >
                 {tree}
               </div>
@@ -220,7 +249,10 @@ function FilesPanelContent({ threadId, source, initialPath }: { threadId: string
             case "create-directory":
               return workspace.createDirectory(request.targetPath);
             case "rename":
-              return workspace.movePath(request.sourcePath ?? "", request.targetPath);
+              return workspace.movePath(
+                request.sourcePath ?? "",
+                request.targetPath,
+              );
             case "duplicate":
               return workspace.duplicatePath(
                 request.entryKind,
@@ -241,10 +273,15 @@ function FilesPanelContent({ threadId, source, initialPath }: { threadId: string
             <AlertDialogDescription>
               {deleteEntry?.kind === "directory"
                 ? "The folder and all of its contents will be removed."
-                : "The file will be removed."} This cannot be undone.
+                : "The file will be removed."}{" "}
+              This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {deleteError ? <p className="text-sm text-destructive-text" role="alert">{deleteError}</p> : null}
+          {deleteError ? (
+            <p className="text-sm text-destructive-text" role="alert">
+              {deleteError}
+            </p>
+          ) : null}
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
@@ -253,7 +290,10 @@ function FilesPanelContent({ threadId, source, initialPath }: { threadId: string
                 if (deleteEntry === null) return;
                 event.preventDefault();
                 void workspace
-                  .removePath(deleteEntry.path, deleteEntry.kind === "directory")
+                  .removePath(
+                    deleteEntry.path,
+                    deleteEntry.kind === "directory",
+                  )
                   .then((result) => {
                     if (result.ok) setDeleteEntry(null);
                     else setDeleteError(result.error);
