@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRpc } from "@bb/plugin-sdk/app";
+import type { PluginFileOpenerSource } from "@bb/plugin-sdk/app";
 import type { filesRpcContract } from "../../server";
 
 export interface FileTreeEntry {
@@ -36,8 +37,14 @@ export type SaveState =
   | { kind: "error"; message: string }
   | { kind: "conflict"; currentSha256: string | null };
 
-export interface TabState {
+export interface WorkspaceFileIdentity {
+  version: 1;
+  source: Pick<PluginFileOpenerSource, "kind" | "threadId" | "environmentId" | "projectId">;
   path: string;
+}
+
+export interface TabState extends WorkspaceFileIdentity {
+  id: string;
   file: OpenFile | null;
   loading: boolean;
   draftText: string;
@@ -46,52 +53,88 @@ export interface TabState {
 }
 
 const WORKSPACE_STORAGE_PREFIX = "bb-plugin-files:workspace:";
+const MAX_RESTORED_TABS = 20;
+const MAX_WORKSPACE_PATH_LENGTH = 4_096;
 
 interface StoredWorkspaceState {
-  version: 1;
-  openPaths: string[];
-  activePath: string | null;
+  version: 2;
+  openFiles: WorkspaceFileIdentity[];
+  activeFileId: string | null;
 }
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function storageKey(threadId: string): string {
-  return `${WORKSPACE_STORAGE_PREFIX}${threadId}`;
+function workspaceFileId(identity: WorkspaceFileIdentity): string {
+  return JSON.stringify([identity.version, identity.source.kind, identity.source.threadId, identity.source.environmentId, identity.source.projectId, identity.path]);
 }
 
-function dedupePaths(paths: string[]): string[] {
-  return Array.from(new Set(paths.filter((path) => path.length > 0)));
+function storageKey(source: WorkspaceFileIdentity["source"]): string {
+  return `${WORKSPACE_STORAGE_PREFIX}${JSON.stringify([source.threadId, source.environmentId, source.projectId])}`;
 }
 
-function loadStoredWorkspace(threadId: string): StoredWorkspaceState {
-  if (typeof window === "undefined") {
-    return { version: 1, openPaths: [], activePath: null };
-  }
+function sameSource(
+  left: WorkspaceFileIdentity["source"],
+  right: WorkspaceFileIdentity["source"],
+): boolean {
+  return left.kind === right.kind && left.threadId === right.threadId && left.environmentId === right.environmentId && left.projectId === right.projectId;
+}
+
+function isCanonicalWorkspacePath(path: string): boolean {
+  return path.length > 0 && path.length <= MAX_WORKSPACE_PATH_LENGTH && path.trim() === path && !path.includes("\\") && !path.split("/").some((segment) => segment.length === 0 || segment === "." || segment === ".." || segment.includes("\0"));
+}
+
+function asWorkspaceFileIdentity(value: unknown): WorkspaceFileIdentity | null {
+  if (typeof value !== "object" || value === null) return null;
+  const item = value as Partial<WorkspaceFileIdentity>;
+  if (item.version !== 1 || typeof item.path !== "string" || !isCanonicalWorkspacePath(item.path)) return null;
+  const source = item.source;
+  if (source?.kind !== "workspace" || typeof source.threadId !== "string" || source.threadId.length === 0) return null;
+  if ((source.environmentId !== null && typeof source.environmentId !== "string") || (source.projectId !== null && typeof source.projectId !== "string")) return null;
+  return { version: 1, source, path: item.path };
+}
+
+function loadStoredWorkspace(source: WorkspaceFileIdentity["source"]): StoredWorkspaceState {
+  const empty = { version: 2 as const, openFiles: [], activeFileId: null };
+  if (typeof window === "undefined") return empty;
   try {
-    const raw = window.localStorage.getItem(storageKey(threadId));
-    if (raw === null) return { version: 1, openPaths: [], activePath: null };
+    const raw = window.localStorage.getItem(storageKey(source));
+    if (raw === null) return empty;
     const parsed = JSON.parse(raw) as Partial<StoredWorkspaceState>;
-    const openPaths = dedupePaths(Array.isArray(parsed.openPaths) ? parsed.openPaths.filter((value): value is string => typeof value === "string") : []);
-    const activePath = typeof parsed.activePath === "string" && openPaths.includes(parsed.activePath) ? parsed.activePath : openPaths[0] ?? null;
-    return { version: 1, openPaths, activePath };
+    if (parsed.version === 2 && Array.isArray(parsed.openFiles)) {
+      const openFiles = parsed.openFiles
+        .map(asWorkspaceFileIdentity)
+        .filter((value): value is WorkspaceFileIdentity => value !== null && sameSource(value.source, source));
+      const ids = new Set<string>();
+      const unique = openFiles.filter((file) => !ids.has(workspaceFileId(file)) && ids.add(workspaceFileId(file))).slice(0, MAX_RESTORED_TABS);
+      const activeFileId = typeof parsed.activeFileId === "string" && unique.some((file) => workspaceFileId(file) === parsed.activeFileId) ? parsed.activeFileId : unique[0] ? workspaceFileId(unique[0]) : null;
+      return { version: 2, openFiles: unique, activeFileId };
+    }
+    return empty;
   } catch {
-    return { version: 1, openPaths: [], activePath: null };
+    return empty;
   }
 }
 
-function saveStoredWorkspace(threadId: string, state: StoredWorkspaceState): void {
+function saveStoredWorkspace(source: WorkspaceFileIdentity["source"], state: StoredWorkspaceState): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(storageKey(threadId), JSON.stringify(state));
+    window.localStorage.setItem(storageKey(source), JSON.stringify(state));
   } catch {
     // Ignore storage failures. The editor still works without persisted tabs.
   }
 }
 
-export function useFilesWorkspace(threadId: string) {
+export function useFilesWorkspace(
+  threadId: string,
+  source: WorkspaceFileIdentity["source"] = { kind: "workspace", threadId, environmentId: null, projectId: null },
+  initialPath: string | null = null,
+  authorized = true,
+) {
   const rpc = useRpc<typeof filesRpcContract>();
+  const workspaceSource = useMemo(() => ({ ...source, kind: "workspace" as const, threadId }), [source.environmentId, source.projectId, threadId]);
+  const canRead = authorized && source.kind === "workspace" && source.threadId === threadId;
   const [query, setQuery] = useState("");
   const [rootName, setRootName] = useState("Files");
   const [entries, setEntries] = useState<FileTreeEntry[]>([]);
@@ -100,10 +143,19 @@ export function useFilesWorkspace(threadId: string) {
   const [truncated, setTruncated] = useState(false);
   const [annotateAvailable, setAnnotateAvailable] = useState(false);
 
-  const [initialWorkspace] = useState(() => loadStoredWorkspace(threadId));
+  const [initialWorkspace] = useState<StoredWorkspaceState>(() => {
+    const stored = loadStoredWorkspace(workspaceSource);
+    if (!canRead || initialPath === null || !isCanonicalWorkspacePath(initialPath)) return stored;
+    const initial = { version: 1 as const, source: workspaceSource, path: initialPath };
+    const initialId = workspaceFileId(initial);
+    return stored.openFiles.some((file) => workspaceFileId(file) === initialId)
+      ? { ...stored, activeFileId: initialId }
+      : { ...stored, openFiles: [...stored.openFiles.filter((file) => file.path !== stored.openFiles[0]?.path), initial].slice(-MAX_RESTORED_TABS), activeFileId: initialId };
+  });
   const [tabs, setTabs] = useState<TabState[]>(() =>
-    initialWorkspace.openPaths.map((path) => ({
-      path,
+    initialWorkspace.openFiles.map((identity) => ({
+      ...identity,
+      id: workspaceFileId(identity),
       file: null,
       loading: true,
       draftText: "",
@@ -111,8 +163,9 @@ export function useFilesWorkspace(threadId: string) {
       saveState: { kind: "saved" },
     })),
   );
-  const [activePath, setActivePath] = useState<string | null>(initialWorkspace.activePath);
+  const [activePath, setActivePath] = useState<string | null>(() => initialWorkspace.openFiles.find((file) => workspaceFileId(file) === initialWorkspace.activeFileId)?.path ?? null);
 
+  const tabIdForPath = useCallback((path: string) => workspaceFileId({ version: 1, source: workspaceSource, path }), [workspaceSource]);
   const tabsRef = useRef(tabs);
   const activePathRef = useRef(activePath);
   const treeRequestRef = useRef(0);
@@ -123,24 +176,26 @@ export function useFilesWorkspace(threadId: string) {
   useEffect(() => void (activePathRef.current = activePath), [activePath]);
 
   useEffect(() => {
-    saveStoredWorkspace(threadId, {
-      version: 1,
-      openPaths: tabs.map((tab) => tab.path),
-      activePath,
+    saveStoredWorkspace(workspaceSource, {
+      version: 2,
+      openFiles: tabs.map(({ version, source: tabSource, path }) => ({ version, source: tabSource, path })),
+      activeFileId: activePath === null ? null : tabIdForPath(activePath),
     });
-  }, [activePath, tabs, threadId]);
+  }, [activePath, tabIdForPath, tabs, workspaceSource]);
 
   useEffect(() => {
+    if (!canRead) return;
     tabs.forEach((tab) => {
-      if (tab.file !== null || !tab.loading || fileLoadRequestsRef.current.has(tab.path)) return;
+      if (tab.file !== null || !tab.loading || fileLoadRequestsRef.current.has(tab.id)) return;
       const path = tab.path;
-      fileLoadRequestsRef.current.add(path);
+      const id = tab.id;
+      fileLoadRequestsRef.current.add(id);
       void rpc
         .call("readFile", { threadId, path })
         .then((result) => {
           setTabs((curr) =>
             curr.map((current) => {
-              if (current.path !== path) return current;
+              if (current.id !== id) return current;
               return {
                 ...current,
                 file: result,
@@ -155,7 +210,7 @@ export function useFilesWorkspace(threadId: string) {
         .catch((error) => {
           setTabs((curr) =>
             curr.map((current) =>
-              current.path === path
+              current.id === id
                 ? {
                     ...current,
                     loading: false,
@@ -166,21 +221,23 @@ export function useFilesWorkspace(threadId: string) {
           );
         })
         .finally(() => {
-          fileLoadRequestsRef.current.delete(path);
+          fileLoadRequestsRef.current.delete(id);
         });
     });
-  }, [rpc, tabs, threadId]);
+  }, [canRead, rpc, tabs, threadId]);
 
   const openInPreferredViewer = useCallback(
     async (path: string) => {
+      if (!canRead || !isCanonicalWorkspacePath(path)) return false;
       const result = await rpc.call("openFile", { threadId, path });
       return result.delivered > 0;
     },
-    [rpc, threadId],
+    [canRead, rpc, threadId],
   );
 
   const refreshTree = useCallback(
     async (nextQuery = query, silent = false) => {
+      if (!canRead) return false;
       const request = ++treeRequestRef.current;
       if (!silent) setTreeLoading(true);
       try {
@@ -203,15 +260,21 @@ export function useFilesWorkspace(threadId: string) {
         if (request === treeRequestRef.current && !silent) setTreeLoading(false);
       }
     },
-    [query, rpc, threadId],
+    [canRead, query, rpc, threadId],
   );
 
   useEffect(() => {
+    if (!canRead) {
+      setTreeLoading(false);
+      setTreeError("This file source is not available in the active workspace.");
+      return;
+    }
     const timer = window.setTimeout(() => void refreshTree(query), 200);
     return () => window.clearTimeout(timer);
-  }, [query, refreshTree]);
+  }, [canRead, query, refreshTree]);
 
   const save = useCallback(async (path: string): Promise<boolean> => {
+    if (!canRead) return false;
     const existingPromise = savePromisesRef.current[path];
     if (existingPromise) return existingPromise;
     const tab = tabsRef.current.find(t => t.path === path);
@@ -224,6 +287,8 @@ export function useFilesWorkspace(threadId: string) {
       return tab.saveState.kind !== "conflict";
     }
     if (tab.saveState.kind === "conflict") return false;
+    const file = tab.file;
+    if (file?.state !== "text") return false;
 
     const pending = (async () => {
       setTabs(curr => curr.map(t => t.path === path ? { ...t, saveState: { kind: "saving" } } : t));
@@ -232,7 +297,7 @@ export function useFilesWorkspace(threadId: string) {
           threadId,
           path,
           content: tab.draftText,
-          expectedSha256: tab.file!.sha256,
+          expectedSha256: file.sha256,
         });
         if (result.outcome === "conflict") {
           setTabs(curr => curr.map(t => t.path === path ? {
@@ -264,22 +329,28 @@ export function useFilesWorkspace(threadId: string) {
         delete savePromisesRef.current[path];
       }
     }
-  }, [rpc, threadId]);
+  }, [canRead, rpc, threadId]);
 
   const openPath = useCallback(
     async (path: string): Promise<boolean> => {
+      if (!canRead || !isCanonicalWorkspacePath(path)) return false;
       setActivePath(path);
-      const existingTab = tabsRef.current.find(t => t.path === path);
+      const id = tabIdForPath(path);
+      const existingTab = tabsRef.current.find((tab) => tab.id === id);
       if (existingTab) return true;
 
-      setTabs(curr => [...curr, {
-        path,
+      const identity = { version: 1 as const, source: workspaceSource, path };
+      const newTab: TabState = {
+        ...identity,
+        id,
         file: null,
         loading: true,
         draftText: "",
         savedText: "",
-        saveState: { kind: "saved" }
-      }]);
+        saveState: { kind: "saved" },
+      };
+      tabsRef.current = [...tabsRef.current, newTab];
+      setTabs((curr) => [...curr, newTab]);
 
       try {
         const result = await rpc.call("readFile", { threadId, path });
@@ -297,7 +368,7 @@ export function useFilesWorkspace(threadId: string) {
         return true;
       } catch (error) {
         setTabs(curr => curr.map(t => {
-          if (t.path !== path) return t;
+          if (t.id !== id) return t;
           return {
             ...t,
             loading: false,
@@ -307,7 +378,7 @@ export function useFilesWorkspace(threadId: string) {
         return false;
       }
     },
-    [rpc, threadId],
+    [canRead, rpc, tabIdForPath, threadId, workspaceSource],
   );
 
   const closeFile = useCallback(async (path: string) => {
@@ -334,6 +405,7 @@ export function useFilesWorkspace(threadId: string) {
   }, [tabs, save]);
 
   const reloadFile = useCallback(async (path: string) => {
+    if (!canRead || !isCanonicalWorkspacePath(path)) return false;
     setTabs(curr => curr.map(t => t.path === path ? { ...t, loading: true } : t));
     try {
       const result = await rpc.call("readFile", { threadId, path });
@@ -357,9 +429,10 @@ export function useFilesWorkspace(threadId: string) {
       } : t));
       return false;
     }
-  }, [rpc, threadId]);
+  }, [canRead, rpc, threadId]);
 
   const overwrite = useCallback(async (path: string) => {
+    if (!canRead || !isCanonicalWorkspacePath(path)) return false;
     const tab = tabsRef.current.find(t => t.path === path);
     if (!tab || tab.file?.state !== "text") return false;
     setTabs(curr => curr.map(t => t.path === path ? { ...t, saveState: { kind: "saving" } } : t));
@@ -387,9 +460,10 @@ export function useFilesWorkspace(threadId: string) {
       setTabs(curr => curr.map(t => t.path === path ? { ...t, saveState: { kind: "error", message: message(error) } } : t));
       return false;
     }
-  }, [rpc, threadId]);
+  }, [canRead, rpc, threadId]);
 
   useEffect(() => {
+    if (!canRead) return;
     const timer = window.setInterval(() => {
       void refreshTree(query, true);
       const currentTabs = tabsRef.current;
@@ -402,9 +476,7 @@ export function useFilesWorkspace(threadId: string) {
             const latestTab = tabsRef.current.find(t => t.path === path);
             if (!latestTab || latestTab.file?.sha256 === tab.file?.sha256) return;
             
-            if (latestTab.draftText !== latestTab.savedText) {
-              setTabs(curr => curr.map(t => t.path === path ? { ...t, saveState: { kind: "conflict", currentSha256: remote.sha256 } } : t));
-            } else {
+            if (latestTab.draftText === latestTab.savedText) {
               setTabs(curr => curr.map(t => {
                 if (t.path !== path) return t;
                 return {
@@ -414,16 +486,19 @@ export function useFilesWorkspace(threadId: string) {
                   savedText: remote.state === "text" ? remote.content : "",
                 };
               }));
+            } else {
+              setTabs(curr => curr.map(t => t.path === path ? { ...t, saveState: { kind: "conflict", currentSha256: remote.sha256 } } : t));
             }
           })
           .catch(() => undefined);
       });
     }, 10_000);
     return () => window.clearInterval(timer);
-  }, [query, refreshTree, rpc, threadId]);
+  }, [canRead, query, refreshTree, rpc, threadId]);
 
   const runMutation = useCallback(
     async (operation: () => Promise<unknown>) => {
+      if (!canRead) return { ok: false as const, error: "This file source is not available in the active workspace." };
       try {
         await operation();
         await refreshTree(query);
@@ -432,48 +507,57 @@ export function useFilesWorkspace(threadId: string) {
         return { ok: false as const, error: message(error) };
       }
     },
-    [query, refreshTree],
+    [canRead, query, refreshTree],
   );
 
   const createFile = useCallback(
-    (path: string) =>
-      runMutation(async () => {
-        const result = await rpc.call("createFile", { threadId, path });
+    (path: string) => {
+      if (!isCanonicalWorkspacePath(path)) return Promise.resolve({ ok: false as const, error: "Invalid workspace path." });
+      return runMutation(async () => {
+        await rpc.call("createFile", { threadId, path });
         // Если файл уже существует (conflict), мы просто проигнорируем ошибку 
         // и всё равно откроем его. Это позволяет открывать скрытые файлы.
         await openPath(path);
-      }),
+      });
+    },
     [openPath, rpc, runMutation, threadId],
   );
 
   const createDirectory = useCallback(
-    (path: string) =>
-      runMutation(() => rpc.call("createDirectory", { threadId, path })),
+    (path: string) => isCanonicalWorkspacePath(path)
+      ? runMutation(() => rpc.call("createDirectory", { threadId, path }))
+      : Promise.resolve({ ok: false as const, error: "Invalid workspace path." }),
     [rpc, runMutation, threadId],
   );
 
   const movePath = useCallback(
-    (sourcePath: string, destinationPath: string) =>
-      runMutation(async () => {
+    (sourcePath: string, destinationPath: string) => {
+      if (!isCanonicalWorkspacePath(sourcePath) || !isCanonicalWorkspacePath(destinationPath)) return Promise.resolve({ ok: false as const, error: "Invalid workspace path." });
+      return runMutation(async () => {
         await rpc.call("movePath", { threadId, sourcePath, destinationPath });
         setTabs(curr => curr.map(t => {
-          if (t.path !== sourcePath) return t;
+          if (t.path !== sourcePath && !t.path.startsWith(`${sourcePath}/`)) return t;
+          const movedPath = t.path === sourcePath ? destinationPath : `${destinationPath}${t.path.slice(sourcePath.length)}`;
+          const moved = { version: 1 as const, source: t.source, path: movedPath };
           return {
             ...t,
-            path: destinationPath,
-            file: t.file ? { ...t.file, path: destinationPath } as OpenFile : null
+            ...moved,
+            id: workspaceFileId(moved),
+            file: t.file ? { ...t.file, path: movedPath } as OpenFile : null
           };
         }));
         if (activePathRef.current === sourcePath) {
           setActivePath(destinationPath);
         }
-      }),
+      });
+    },
     [rpc, runMutation, threadId],
   );
 
   const removePath = useCallback(
-    (path: string, recursive: boolean) =>
-      runMutation(async () => {
+    (path: string, recursive: boolean) => {
+      if (!isCanonicalWorkspacePath(path)) return Promise.resolve({ ok: false as const, error: "Invalid workspace path." });
+      return runMutation(async () => {
         await rpc.call("removePath", { threadId, path, recursive });
         setTabs(curr => {
           const filtered = curr.filter(t => !(t.path === path || t.path.startsWith(`${path}/`)));
@@ -482,7 +566,8 @@ export function useFilesWorkspace(threadId: string) {
           }
           return filtered;
         });
-      }),
+      });
+    },
     [rpc, runMutation, threadId],
   );
 
@@ -506,10 +591,11 @@ export function useFilesWorkspace(threadId: string) {
 
   const getDownloadUrl = useCallback(
     async (path: string) => {
+      if (!canRead || !isCanonicalWorkspacePath(path)) throw new Error("This file source is not available in the active workspace.");
       const result = await rpc.call("getDownloadUrl", { threadId, path });
       return result.url;
     },
-    [rpc, threadId]
+    [canRead, rpc, threadId]
   );
 
   const downloadPath = useCallback(

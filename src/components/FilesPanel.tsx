@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import type { PluginThreadPanelProps } from "@bb/plugin-sdk/app";
+import { useBbContext, type PluginFileOpenerProps, type PluginThreadPanelProps } from "@bb/plugin-sdk/app";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,8 +40,30 @@ function duplicateSuggestion(entry: FileTreeEntry): string {
   return childPath(parent, name);
 }
 
-export function FilesPanel({ threadId }: PluginThreadPanelProps) {
-  const workspace = useFilesWorkspace(threadId);
+type FilesPanelProps = PluginThreadPanelProps | PluginFileOpenerProps;
+
+function isFileOpenerProps(props: FilesPanelProps): props is PluginFileOpenerProps {
+  return "source" in props;
+}
+
+export function FilesPanel(props: FilesPanelProps) {
+  const context = useBbContext();
+  const opener = isFileOpenerProps(props);
+  const threadId = opener ? context.threadId ?? "" : props.threadId;
+  const source = opener
+    ? props.source
+    : { kind: "workspace" as const, threadId, environmentId: null, projectId: context.projectId };
+  // The app SDK exposes no active environment id. An opener carrying one is
+  // therefore unauthorized rather than trusted client-side.
+  const compatible = source.kind === "workspace" && source.threadId === (opener ? context.threadId : threadId) && source.projectId === context.projectId && source.environmentId === null;
+  if (!compatible) {
+    return <div className="grid h-full place-items-center p-6 text-sm text-muted-foreground" role="alert">This file source is not available in the active workspace.</div>;
+  }
+  return <FilesPanelContent key={JSON.stringify(source)} threadId={threadId} source={{ ...source, kind: "workspace" }} initialPath={opener ? props.path : null} />;
+}
+
+function FilesPanelContent({ threadId, source, initialPath }: { threadId: string; source: { kind: "workspace"; threadId: string | null; environmentId: string | null; projectId: string | null }; initialPath: string | null }) {
+  const workspace = useFilesWorkspace(threadId, source, initialPath, true);
   const { containerRef, containerNode, isNarrow } = useResponsiveLayout();
   const [operation, setOperation] = useState<OperationRequest | null>(null);
   const [deleteEntry, setDeleteEntry] = useState<FileTreeEntry | null>(null);
