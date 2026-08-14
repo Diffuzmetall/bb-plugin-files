@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRpc } from "@bb/plugin-sdk/app";
+import { useBbContext, useRpc } from "@bb/plugin-sdk/app";
 import type { PluginFileOpenerSource } from "@bb/plugin-sdk/app";
 import type { filesRpcContract } from "../../server";
 
@@ -85,6 +85,27 @@ function isCanonicalWorkspacePath(path: string): boolean {
   return path.length > 0 && path.length <= MAX_WORKSPACE_PATH_LENGTH && path.trim() === path && !path.includes("\\") && !path.split("/").some((segment) => segment.length === 0 || segment === "." || segment === ".." || segment.includes("\0"));
 }
 
+function isSafeEvictionCandidate(tab: TabState): boolean {
+  return !tab.loading && tab.draftText === tab.savedText && tab.saveState.kind === "saved";
+}
+
+function limitWorkspaceFiles(files: WorkspaceFileIdentity[], requestedId?: string): WorkspaceFileIdentity[] {
+  const unique: WorkspaceFileIdentity[] = [];
+  const ids = new Set<string>();
+  for (const file of files) {
+    const id = workspaceFileId(file);
+    if (!ids.has(id)) {
+      ids.add(id);
+      unique.push(file);
+    }
+  }
+  if (unique.length <= MAX_RESTORED_TABS) return unique;
+  const requested = requestedId === undefined ? null : unique.find((file) => workspaceFileId(file) === requestedId) ?? null;
+  const candidates = unique.filter((file) => requested === null || workspaceFileId(file) !== requestedId);
+  const kept = candidates.slice(Math.max(0, candidates.length - (MAX_RESTORED_TABS - (requested === null ? 0 : 1))));
+  return requested === null ? kept : [...kept, requested];
+}
+
 function asWorkspaceFileIdentity(value: unknown): WorkspaceFileIdentity | null {
   if (typeof value !== "object" || value === null) return null;
   const item = value as Partial<WorkspaceFileIdentity>;
@@ -107,9 +128,10 @@ function loadStoredWorkspace(source: WorkspaceFileIdentity["source"]): StoredWor
         .map(asWorkspaceFileIdentity)
         .filter((value): value is WorkspaceFileIdentity => value !== null && sameSource(value.source, source));
       const ids = new Set<string>();
-      const unique = openFiles.filter((file) => !ids.has(workspaceFileId(file)) && ids.add(workspaceFileId(file))).slice(0, MAX_RESTORED_TABS);
-      const activeFileId = typeof parsed.activeFileId === "string" && unique.some((file) => workspaceFileId(file) === parsed.activeFileId) ? parsed.activeFileId : unique[0] ? workspaceFileId(unique[0]) : null;
-      return { version: 2, openFiles: unique, activeFileId };
+      const unique = openFiles.filter((file) => !ids.has(workspaceFileId(file)) && ids.add(workspaceFileId(file)));
+      const limited = limitWorkspaceFiles(unique);
+      const activeFileId = typeof parsed.activeFileId === "string" && limited.some((file) => workspaceFileId(file) === parsed.activeFileId) ? parsed.activeFileId : limited[0] ? workspaceFileId(limited[0]) : null;
+      return { version: 2, openFiles: limited, activeFileId };
     }
     return empty;
   } catch {
@@ -126,15 +148,17 @@ function saveStoredWorkspace(source: WorkspaceFileIdentity["source"], state: Sto
   }
 }
 
-export function useFilesWorkspace(
-  threadId: string,
-  source: WorkspaceFileIdentity["source"] = { kind: "workspace", threadId, environmentId: null, projectId: null },
-  initialPath: string | null = null,
-  authorized = true,
-) {
+export function useFilesWorkspace(initialPath: string | null = null) {
+  const context = useBbContext();
   const rpc = useRpc<typeof filesRpcContract>();
-  const workspaceSource = useMemo(() => ({ ...source, kind: "workspace" as const, threadId }), [source.environmentId, source.projectId, threadId]);
-  const canRead = authorized && source.kind === "workspace" && source.threadId === threadId;
+  const threadId = context.threadId ?? "";
+  // Environment identity is resolved by the server for every RPC. Persisted
+  // state and component props never contribute to the authorization decision.
+  const workspaceSource = useMemo(
+    () => ({ kind: "workspace" as const, threadId, environmentId: null, projectId: context.projectId }),
+    [context.projectId, threadId],
+  );
+  const canRead = context.threadId !== null;
   const [query, setQuery] = useState("");
   const [rootName, setRootName] = useState("Files");
   const [entries, setEntries] = useState<FileTreeEntry[]>([]);
@@ -150,7 +174,7 @@ export function useFilesWorkspace(
     const initialId = workspaceFileId(initial);
     return stored.openFiles.some((file) => workspaceFileId(file) === initialId)
       ? { ...stored, activeFileId: initialId }
-      : { ...stored, openFiles: [...stored.openFiles.filter((file) => file.path !== stored.openFiles[0]?.path), initial].slice(-MAX_RESTORED_TABS), activeFileId: initialId };
+      : { ...stored, openFiles: limitWorkspaceFiles([...stored.openFiles, initial], initialId), activeFileId: initialId };
   });
   const [tabs, setTabs] = useState<TabState[]>(() =>
     initialWorkspace.openFiles.map((identity) => ({
@@ -274,7 +298,7 @@ export function useFilesWorkspace(
   }, [canRead, query, refreshTree]);
 
   const save = useCallback(async (path: string): Promise<boolean> => {
-    if (!canRead) return false;
+    if (!canRead || !isCanonicalWorkspacePath(path)) return false;
     const existingPromise = savePromisesRef.current[path];
     if (existingPromise) return existingPromise;
     const tab = tabsRef.current.find(t => t.path === path);
@@ -334,10 +358,21 @@ export function useFilesWorkspace(
   const openPath = useCallback(
     async (path: string): Promise<boolean> => {
       if (!canRead || !isCanonicalWorkspacePath(path)) return false;
-      setActivePath(path);
       const id = tabIdForPath(path);
       const existingTab = tabsRef.current.find((tab) => tab.id === id);
-      if (existingTab) return true;
+      if (existingTab) {
+        activePathRef.current = path;
+        setActivePath(path);
+        return true;
+      }
+
+      const evictionCandidate = tabsRef.current.length < MAX_RESTORED_TABS
+        ? null
+        : tabsRef.current.find(isSafeEvictionCandidate) ?? null;
+      if (tabsRef.current.length >= MAX_RESTORED_TABS && evictionCandidate === null) {
+        setTreeError(`Cannot open ${path}: all open tabs have unsaved or unresolved changes.`);
+        return false;
+      }
 
       const identity = { version: 1 as const, source: workspaceSource, path };
       const newTab: TabState = {
@@ -349,8 +384,13 @@ export function useFilesWorkspace(
         savedText: "",
         saveState: { kind: "saved" },
       };
-      tabsRef.current = [...tabsRef.current, newTab];
-      setTabs((curr) => [...curr, newTab]);
+      const nextTabs = evictionCandidate === null
+        ? [...tabsRef.current, newTab]
+        : [...tabsRef.current.filter((tab) => tab.id !== evictionCandidate.id), newTab];
+      activePathRef.current = path;
+      setActivePath(path);
+      tabsRef.current = nextTabs;
+      setTabs(nextTabs);
 
       try {
         const result = await rpc.call("readFile", { threadId, path });
@@ -382,6 +422,7 @@ export function useFilesWorkspace(
   );
 
   const closeFile = useCallback(async (path: string) => {
+    if (!canRead || !isCanonicalWorkspacePath(path)) return false;
     const tab = tabsRef.current.find(t => t.path === path);
     const isDirty = tab?.file?.state === "text" && tab.draftText !== tab.savedText;
     if (isDirty) {
@@ -535,19 +576,26 @@ export function useFilesWorkspace(
       if (!isCanonicalWorkspacePath(sourcePath) || !isCanonicalWorkspacePath(destinationPath)) return Promise.resolve({ ok: false as const, error: "Invalid workspace path." });
       return runMutation(async () => {
         await rpc.call("movePath", { threadId, sourcePath, destinationPath });
-        setTabs(curr => curr.map(t => {
-          if (t.path !== sourcePath && !t.path.startsWith(`${sourcePath}/`)) return t;
-          const movedPath = t.path === sourcePath ? destinationPath : `${destinationPath}${t.path.slice(sourcePath.length)}`;
-          const moved = { version: 1 as const, source: t.source, path: movedPath };
-          return {
-            ...t,
-            ...moved,
-            id: workspaceFileId(moved),
-            file: t.file ? { ...t.file, path: movedPath } as OpenFile : null
-          };
-        }));
-        if (activePathRef.current === sourcePath) {
-          setActivePath(destinationPath);
+        setTabs(curr => {
+          const movedTabs = curr.map(t => {
+            if (t.path !== sourcePath && !t.path.startsWith(`${sourcePath}/`)) return t;
+            const movedPath = t.path === sourcePath ? destinationPath : `${destinationPath}${t.path.slice(sourcePath.length)}`;
+            const moved = { version: 1 as const, source: t.source, path: movedPath };
+            return {
+              ...t,
+              ...moved,
+              id: workspaceFileId(moved),
+              file: t.file ? { ...t.file, path: movedPath } as OpenFile : null,
+            };
+          });
+          tabsRef.current = movedTabs;
+          return movedTabs;
+        });
+        const active = activePathRef.current;
+        if (active === sourcePath || active?.startsWith(`${sourcePath}/`)) {
+          const movedActivePath = `${destinationPath}${active.slice(sourcePath.length)}`;
+          activePathRef.current = movedActivePath;
+          setActivePath(movedActivePath);
         }
       });
     },
@@ -572,8 +620,11 @@ export function useFilesWorkspace(
   );
 
   const duplicatePath = useCallback(
-    (kind: "file" | "directory", sourcePath: string, destinationPath: string) =>
-      runMutation(async () => {
+    (kind: "file" | "directory", sourcePath: string, destinationPath: string) => {
+      if (!isCanonicalWorkspacePath(sourcePath) || !isCanonicalWorkspacePath(destinationPath)) {
+        return Promise.resolve({ ok: false as const, error: "Invalid workspace path." });
+      }
+      return runMutation(async () => {
         const result = await rpc.call("duplicatePath", {
           threadId,
           kind,
@@ -585,7 +636,8 @@ export function useFilesWorkspace(
             `${result.error} Created before failure: ${result.createdPaths.join(", ")}`,
           );
         }
-      }),
+      });
+    },
     [rpc, runMutation, threadId],
   );
 
@@ -600,6 +652,7 @@ export function useFilesWorkspace(
 
   const downloadPath = useCallback(
     async (path: string) => {
+      if (!canRead || !isCanonicalWorkspacePath(path)) return;
       try {
         const url = await getDownloadUrl(path);
         const a = document.createElement("a");
@@ -612,19 +665,26 @@ export function useFilesWorkspace(
         setTabs(curr => curr.map(t => t.path === path ? { ...t, saveState: { kind: "error", message: message(error) } } : t));
       }
     },
-    [getDownloadUrl]
+    [canRead, getDownloadUrl]
   );
 
+  const selectPath = useCallback((path: string | null) => {
+    if (!canRead || (path !== null && (!isCanonicalWorkspacePath(path) || !tabsRef.current.some((tab) => tab.path === path)))) return;
+    activePathRef.current = path;
+    setActivePath(path);
+  }, [canRead]);
+
   const setDraftText = useCallback((path: string, text: string) => {
+    if (!canRead || !isCanonicalWorkspacePath(path) || !tabsRef.current.some((tab) => tab.path === path)) return;
     setTabs(curr => curr.map(t => t.path === path ? { ...t, draftText: text } : t));
-  }, []);
+  }, [canRead]);
 
   return useMemo(
     () => ({
       tabs,
       activePath,
       annotateAvailable,
-      setActivePath,
+      setActivePath: selectPath,
       closeFile,
       createDirectory,
       createFile,
@@ -652,6 +712,7 @@ export function useFilesWorkspace(
       tabs,
       activePath,
       annotateAvailable,
+      selectPath,
       closeFile,
       createDirectory,
       createFile,

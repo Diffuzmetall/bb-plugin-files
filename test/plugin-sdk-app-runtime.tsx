@@ -11,10 +11,12 @@ interface ThreadPanelRegistration {
 
 const captured = { threadPanelActions: [] as ThreadPanelRegistration[] };
 let rpcHandlers: Record<string, (input: unknown) => unknown> = {};
+let bbContext = { projectId: null as string | null, threadId: null as string | null };
 
 export function resetPluginRuntime() {
   captured.threadPanelActions.length = 0;
   rpcHandlers = {};
+  bbContext = { projectId: null, threadId: null };
 }
 
 export function getCapturedPluginApp() {
@@ -60,8 +62,12 @@ export function Markdown({ content, className }: { content: string; className?: 
   );
 }
 
+export function setBbContext(context: { projectId: string | null; threadId: string | null }) {
+  bbContext = context;
+}
+
 export function useBbContext() {
-  return { projectId: null, threadId: null };
+  return bbContext;
 }
 
 export function RuntimeProvider({ children }: { children: ReactNode }) {
