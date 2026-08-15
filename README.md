@@ -1,6 +1,27 @@
 # BB Files
 
+[![CI](https://github.com/Diffuzmetall/bb-plugin-files/actions/workflows/ci.yml/badge.svg)](https://github.com/Diffuzmetall/bb-plugin-files/actions/workflows/ci.yml)
+
 A standalone BB plugin that adds **Actions → Files** to every thread. The panel is bound to that thread's live environment and uses `bb.sdk.files`, so the same tree/editor works on the local machine and connected hosts.
+
+## Install
+
+BB Files requires BB `>=0.35.1`. Install the current tagged release:
+
+```bash
+bb plugin install 'git:https://github.com/Diffuzmetall/bb-plugin-files.git@v0.1.0' --yes
+```
+
+After the plugin is listed in the BB Community marketplace, BB can report and
+apply compatible tagged updates without installing them automatically:
+
+```bash
+bb plugin outdated
+bb plugin update files
+```
+
+Releases use immutable `vX.Y.Z` Git tags. Marketplace updates within the
+current `^0.1.0` range are selected from those tags.
 
 ## Project documentation
 
@@ -104,3 +125,14 @@ See [`ROADMAP.md`](ROADMAP.md) for the complete idea backlog and proposed implem
 The frontend sends only `threadId` and project-relative paths. Every RPC resolves the thread environment again. Reads and mutations are confined with `hostId` and `rootPath`; `listPaths` receives the resolved absolute root because that SDK method has no `rootPath` field. Existing-file writes use their last-read SHA. New files use create-only writes. Folder duplication preflights at 501 entries and refuses more than 500.
 
 Binary and oversized files are metadata-only. There is no fallback to the primary machine when the thread environment is unavailable.
+
+BB plugins are full-trust code. Files can read, create, edit, move, duplicate,
+download, and delete files inside the selected thread environment, including
+common dotfiles such as `.env` and `.npmrc`. Destructive actions are initiated
+by the user through confirmation UI. The plugin has no telemetry, external
+service, or outbound network integration, and it does not send workspace
+contents elsewhere.
+
+## License
+
+[MIT](LICENSE)
