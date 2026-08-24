@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useBbContext, useRpc } from "@bb/plugin-sdk/app";
 import type { PluginFileOpenerSource } from "@bb/plugin-sdk/app";
 import type { filesRpcContract } from "../../server";
+import { parentPath } from "../tree-order";
 
 export interface FileTreeEntry {
   kind: "file" | "directory";
@@ -161,11 +162,23 @@ export function useFilesWorkspace(initialPath: string | null = null) {
   const canRead = context.threadId !== null;
   const [query, setQuery] = useState("");
   const [rootName, setRootName] = useState("Files");
-  const [entries, setEntries] = useState<FileTreeEntry[]>([]);
+  // Lazily-expanding tree state: children are fetched one directory at a
+  // time (keyed by that directory's path, "" for the root) and dropped again
+  // on collapse, so memory tracks what's actually expanded rather than the
+  // whole workspace. Search (non-empty query) bypasses this entirely and
+  // fills `searchEntries` from a single recursive call instead.
+  const [childrenByDir, setChildrenByDir] = useState<Map<string, FileTreeEntry[]>>(new Map());
+  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
+  const [searchEntries, setSearchEntries] = useState<FileTreeEntry[]>([]);
   const [treeLoading, setTreeLoading] = useState(true);
   const [treeError, setTreeError] = useState<string | null>(null);
   const [truncated, setTruncated] = useState(false);
   const [annotateAvailable, setAnnotateAvailable] = useState(false);
+
+  const entries = useMemo(
+    () => (query.length > 0 ? searchEntries : Array.from(childrenByDir.values()).flat()),
+    [query, searchEntries, childrenByDir],
+  );
 
   const [initialWorkspace] = useState<StoredWorkspaceState>(() => {
     const stored = loadStoredWorkspace(workspaceSource);
@@ -195,9 +208,14 @@ export function useFilesWorkspace(initialPath: string | null = null) {
   const treeRequestRef = useRef(0);
   const fileLoadRequestsRef = useRef<Set<string>>(new Set());
   const savePromisesRef = useRef<Record<string, Promise<boolean> | undefined>>({});
+  const childrenByDirRef = useRef(childrenByDir);
+  const expandedDirsRef = useRef(expandedDirs);
+  const dirRequestsRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => void (tabsRef.current = tabs), [tabs]);
   useEffect(() => void (activePathRef.current = activePath), [activePath]);
+  useEffect(() => void (childrenByDirRef.current = childrenByDir), [childrenByDir]);
+  useEffect(() => void (expandedDirsRef.current = expandedDirs), [expandedDirs]);
 
   useEffect(() => {
     saveStoredWorkspace(workspaceSource, {
@@ -259,23 +277,93 @@ export function useFilesWorkspace(initialPath: string | null = null) {
     [canRead, rpc, threadId],
   );
 
+  // Fetches one directory's immediate children and stores them under its own
+  // key. Does not touch `expandedDirs` — callers decide expand/collapse.
+  const loadDirectory = useCallback(
+    async (dirPath: string, silent = false): Promise<boolean> => {
+      if (!canRead) return false;
+      const request = (dirRequestsRef.current.get(dirPath) ?? 0) + 1;
+      dirRequestsRef.current.set(dirPath, request);
+      try {
+        const result = await rpc.call("listDirectory", { threadId, path: dirPath });
+        if (dirRequestsRef.current.get(dirPath) !== request) return false;
+        setChildrenByDir((current) => {
+          const next = new Map(current);
+          next.set(dirPath, result.entries);
+          return next;
+        });
+        if (result.rootName !== undefined) setRootName(result.rootName);
+        if (result.annotateAvailable !== undefined) setAnnotateAvailable(result.annotateAvailable);
+        if (!silent) setTreeError(null);
+        return true;
+      } catch (error) {
+        if (dirRequestsRef.current.get(dirPath) !== request) return false;
+        if (!silent) setTreeError(message(error));
+        return false;
+      }
+    },
+    [canRead, rpc, threadId],
+  );
+
+  const expandDirectory = useCallback(
+    (dirPath: string) => {
+      setExpandedDirs((current) => (current.has(dirPath) ? current : new Set(current).add(dirPath)));
+      if (!childrenByDirRef.current.has(dirPath)) void loadDirectory(dirPath);
+    },
+    [loadDirectory],
+  );
+
+  // Drops the collapsed directory's children (and every already-loaded
+  // descendant) from state, so a folder the user closes stops holding memory.
+  const collapseDirectory = useCallback((dirPath: string) => {
+    setExpandedDirs((current) => {
+      if (!current.has(dirPath)) return current;
+      const next = new Set(current);
+      next.delete(dirPath);
+      return next;
+    });
+    setChildrenByDir((current) => {
+      let changed = false;
+      const next = new Map(current);
+      for (const key of current.keys()) {
+        if (key === dirPath || key.startsWith(`${dirPath}/`)) {
+          next.delete(key);
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, []);
+
+  const toggleDirectory = useCallback(
+    (dirPath: string) => {
+      if (expandedDirsRef.current.has(dirPath)) collapseDirectory(dirPath);
+      else expandDirectory(dirPath);
+    },
+    [collapseDirectory, expandDirectory],
+  );
+
   const refreshTree = useCallback(
     async (nextQuery = query, silent = false) => {
       if (!canRead) return false;
       const request = ++treeRequestRef.current;
       if (!silent) setTreeLoading(true);
       try {
-        const result = await rpc.call("listTree", {
-          threadId,
-          query: nextQuery,
-        });
+        if (nextQuery.length > 0) {
+          const result = await rpc.call("listTree", { threadId, query: nextQuery });
+          if (request !== treeRequestRef.current) return false;
+          setRootName(result.rootName);
+          setSearchEntries(result.entries);
+          setTruncated(result.truncated);
+          setAnnotateAvailable(result.annotateAvailable === true);
+          setTreeError(null);
+          return true;
+        }
+        const loadedDirs = ["", ...expandedDirsRef.current];
+        const results = await Promise.all(loadedDirs.map((dirPath) => loadDirectory(dirPath, silent)));
         if (request !== treeRequestRef.current) return false;
-        setRootName(result.rootName);
-        setEntries(result.entries);
-        setTruncated(result.truncated);
-        setAnnotateAvailable(result.annotateAvailable === true);
-        setTreeError(null);
-        return true;
+        setTruncated(false);
+        return results.every(Boolean);
       } catch (error) {
         if (request !== treeRequestRef.current) return false;
         setTreeError(message(error));
@@ -284,7 +372,7 @@ export function useFilesWorkspace(initialPath: string | null = null) {
         if (request === treeRequestRef.current && !silent) setTreeLoading(false);
       }
     },
-    [canRead, query, rpc, threadId],
+    [canRead, loadDirectory, query, rpc, threadId],
   );
 
   useEffect(() => {
@@ -296,6 +384,18 @@ export function useFilesWorkspace(initialPath: string | null = null) {
     const timer = window.setTimeout(() => void refreshTree(query), 200);
     return () => window.clearTimeout(timer);
   }, [canRead, query, refreshTree]);
+
+  // Reveal the active file by expanding (and lazily loading) every folder
+  // above it, so opening a path inside a collapsed folder still shows up in
+  // the tree instead of only in the editor.
+  useEffect(() => {
+    if (activePath === null) return;
+    let parent = parentPath(activePath);
+    while (parent.length > 0) {
+      expandDirectory(parent);
+      parent = parentPath(parent);
+    }
+  }, [activePath, expandDirectory]);
 
   const save = useCallback(async (path: string): Promise<boolean> => {
     if (!canRead || !isCanonicalWorkspacePath(path)) return false;
@@ -693,6 +793,8 @@ export function useFilesWorkspace(initialPath: string | null = null) {
       setDraftText,
       duplicatePath,
       entries,
+      expandedDirs,
+      toggleDirectory,
       movePath,
       openPath,
       openInPreferredViewer,
@@ -721,6 +823,8 @@ export function useFilesWorkspace(initialPath: string | null = null) {
       setDraftText,
       duplicatePath,
       entries,
+      expandedDirs,
+      toggleDirectory,
       movePath,
       openPath,
       openInPreferredViewer,

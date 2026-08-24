@@ -2,7 +2,6 @@ import {
   useEffect,
   useMemo,
   useRef,
-  useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { Button } from "@/components/ui/button";
@@ -16,7 +15,6 @@ import type { FileTreeEntry } from "../hooks/useFilesWorkspace";
 import {
   filterVisibleEntries,
   orderTreeEntries,
-  parentPath,
   searchSortEntries,
 } from "../tree-order";
 
@@ -158,11 +156,13 @@ function TreeRow({
 export function TreePane({
   entries,
   error,
+  expandedDirs,
   loading,
   onAction,
   onCreateRoot,
   onOpen,
   onRefresh,
+  onToggleDirectory,
   query,
   rootName,
   selectedPath,
@@ -172,11 +172,13 @@ export function TreePane({
 }: {
   entries: FileTreeEntry[];
   error: string | null;
+  expandedDirs: ReadonlySet<string>;
   loading: boolean;
   onAction(action: FileAction, entry: FileTreeEntry): void;
   onCreateRoot(kind: "file" | "directory"): void;
   onOpen(path: string): void;
   onRefresh(): void;
+  onToggleDirectory(path: string): void;
   query: string;
   rootName: string;
   selectedPath: string | null;
@@ -184,36 +186,10 @@ export function TreePane({
   showAnnotate: boolean;
   truncated: boolean;
 }) {
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-
-  // Reveal a newly selected file by expanding every folder above it, so a
-  // file created or opened inside a collapsed folder appears in the tree
-  // instead of only in the editor.
-  useEffect(() => {
-    if (selectedPath === null) return;
-    const ancestors: string[] = [];
-    let parent = parentPath(selectedPath);
-    while (parent.length > 0) {
-      ancestors.push(parent);
-      parent = parentPath(parent);
-    }
-    if (ancestors.length === 0) return;
-    setExpanded((current) => {
-      let next = current;
-      for (const ancestor of ancestors) {
-        if (!next.has(ancestor)) {
-          if (next === current) next = new Set(current);
-          next.add(ancestor);
-        }
-      }
-      return next;
-    });
-  }, [selectedPath]);
-
   const visibleEntries = useMemo(() => {
     if (query.length > 0) return searchSortEntries(entries);
-    return filterVisibleEntries(orderTreeEntries(entries), expanded);
-  }, [entries, expanded, query]);
+    return filterVisibleEntries(orderTreeEntries(entries), expandedDirs);
+  }, [entries, expandedDirs, query]);
 
   return (
     <aside className="flex h-full min-h-0 min-w-0 flex-col bg-background">
@@ -290,19 +266,12 @@ export function TreePane({
             <TreeRow
               key={entry.path}
               entry={entry}
-              expanded={expanded.has(entry.path)}
+              expanded={expandedDirs.has(entry.path)}
               selected={selectedPath === entry.path}
               onAction={onAction}
               onOpen={onOpen}
               showAnnotate={showAnnotate}
-              onToggle={(path) =>
-                setExpanded((current) => {
-                  const next = new Set(current);
-                  if (next.has(path)) next.delete(path);
-                  else next.add(path);
-                  return next;
-                })
-              }
+              onToggle={onToggleDirectory}
             />
           ))
         )}

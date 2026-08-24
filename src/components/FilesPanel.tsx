@@ -170,11 +170,13 @@ function FilesPanelContent({ initialPath }: { initialPath: string | null }) {
     <TreePane
       entries={workspace.entries}
       error={workspace.treeError}
+      expandedDirs={workspace.expandedDirs}
       loading={workspace.treeLoading}
       onAction={handleAction}
       onCreateRoot={(kind) => requestCreate(kind)}
       onOpen={(path) => void workspace.openPath(path)}
       onRefresh={() => void workspace.refreshTree()}
+      onToggleDirectory={workspace.toggleDirectory}
       query={workspace.query}
       rootName={workspace.rootName}
       selectedPath={workspace.activePath}

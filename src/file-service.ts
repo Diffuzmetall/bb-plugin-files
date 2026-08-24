@@ -1,7 +1,8 @@
 import type { BbPluginApi } from "@bb/plugin-sdk";
-import { resolveThreadEnvironment } from "./environment";
+import { resolveThreadEnvironment, type ThreadEnvironmentTarget } from "./environment";
 import { duplicateDirectory, duplicateFile } from "./duplicate";
 import {
+  joinProjectPaths,
   parseRelativePath,
   projectBasename,
   resolveProjectPath,
@@ -10,7 +11,92 @@ import {
 export const TREE_LIMIT = 10_000;
 export const MAX_TEXT_BYTES = 2 * 1024 * 1024;
 
+const ROOT_DOTFILE_PROBES = [
+  ".gitignore", ".env", ".env.local", ".env.development", ".env.production",
+  ".pi", ".github", ".vscode", ".cursorrules", ".cursorignore",
+  ".npmrc", ".nvmrc", ".yarnrc",
+  ".dockerignore", ".editorconfig",
+  ".prettierrc", ".eslintrc", ".eslintrc.json", ".eslintrc.js"
+];
+
 type FilesSdk = BbPluginApi["sdk"]["files"];
+
+interface TreeEntryLike {
+  kind: "file" | "directory";
+  path: string;
+  name: string;
+  score: number;
+  positions: number[];
+}
+
+/**
+ * host.list_paths/browse_directory both hide dotfiles, but common config
+ * dotfiles are still worth surfacing at the workspace root. Probes each by
+ * name and appends whatever exists (as a file, or walked one level deep as a
+ * directory) directly onto `entries`.
+ */
+async function appendRootDotfileProbes(
+  bb: BbPluginApi,
+  environment: ThreadEnvironmentTarget,
+  entries: TreeEntryLike[],
+): Promise<void> {
+  await Promise.all(
+    ROOT_DOTFILE_PROBES.map(async (name) => {
+      try {
+        const resolved = resolveProjectPath(environment.rootPath, name, { allowEmpty: false });
+        try {
+          // Try reading as file
+          await bb.sdk.files.read({
+            hostId: environment.hostId,
+            rootPath: environment.rootPath,
+            path: resolved.absolutePath,
+          });
+          entries.push({
+            kind: "file",
+            path: name,
+            name: name,
+            score: 0,
+            positions: [],
+          });
+        } catch (e: any) {
+          // If it's a 404, it doesn't exist
+          const errorStr = String(e?.message || e);
+          if (errorStr.includes("404") || errorStr.includes("not exist") || errorStr.includes("path_not_found")) {
+            return; // Skip, it really doesn't exist
+          }
+
+          // If it failed but it's not a 404, it might be a directory
+          const dirResult = await bb.sdk.files.listPaths({
+            hostId: environment.hostId,
+            path: resolved.absolutePath,
+            includeFiles: true,
+            includeDirectories: true,
+            limit: 1000,
+          });
+          entries.push({
+            kind: "directory",
+            path: name,
+            name: name,
+            score: 0,
+            positions: [],
+          });
+          for (const child of dirResult.paths) {
+            const childPath = name + "/" + child.path;
+            entries.push({
+              kind: child.kind,
+              path: childPath,
+              name: child.name,
+              score: 0,
+              positions: [],
+            });
+          }
+        }
+      } catch {
+        // Item does not exist, ignore
+      }
+    })
+  );
+}
 
 function fileMetadata(
   relativePath: string,
@@ -53,69 +139,7 @@ export function createFileService(bb: BbPluginApi) {
       });
 
       if (query.length === 0) {
-        const probes = [
-          ".gitignore", ".env", ".env.local", ".env.development", ".env.production",
-          ".pi", ".github", ".vscode", ".cursorrules", ".cursorignore",
-          ".npmrc", ".nvmrc", ".yarnrc",
-          ".dockerignore", ".editorconfig",
-          ".prettierrc", ".eslintrc", ".eslintrc.json", ".eslintrc.js"
-        ];
-        await Promise.all(
-          probes.map(async (name) => {
-            try {
-              const resolved = resolveProjectPath(environment.rootPath, name, { allowEmpty: false });
-              try {
-                // Try reading as file
-                await bb.sdk.files.read({
-                  hostId: environment.hostId,
-                  rootPath: environment.rootPath,
-                  path: resolved.absolutePath,
-                });
-                entries.push({
-                  kind: "file",
-                  path: name,
-                  name: name,
-                  score: 0,
-                  positions: [],
-                });
-              } catch (e: any) {
-                // If it's a 404, it doesn't exist
-                const errorStr = String(e?.message || e);
-                if (errorStr.includes("404") || errorStr.includes("not exist") || errorStr.includes("path_not_found")) {
-                  return; // Skip, it really doesn't exist
-                }
-                
-                // If it failed but it's not a 404, it might be a directory
-                const dirResult = await bb.sdk.files.listPaths({
-                  hostId: environment.hostId,
-                  path: resolved.absolutePath,
-                  includeFiles: true,
-                  includeDirectories: true,
-                  limit: 1000,
-                });
-                entries.push({
-                  kind: "directory",
-                  path: name,
-                  name: name,
-                  score: 0,
-                  positions: [],
-                });
-                for (const child of dirResult.paths) {
-                  const childPath = name + "/" + child.path;
-                  entries.push({
-                    kind: child.kind,
-                    path: childPath,
-                    name: child.name,
-                    score: 0,
-                    positions: [],
-                  });
-                }
-              }
-            } catch {
-              // Item does not exist, ignore
-            }
-          })
-        );
+        await appendRootDotfileProbes(bb, environment, entries);
       }
 
       const { plugins } = await bb.sdk.plugins.list();
@@ -125,6 +149,46 @@ export function createFileService(bb: BbPluginApi) {
         rootName: projectBasename(environment.rootPath),
         entries,
         truncated: result.truncated,
+        annotateAvailable:
+          annotate?.status === "running" &&
+          annotate.app.hasApp &&
+          annotate.app.bundle?.compatible === true,
+      };
+    },
+
+    // Single-level directory read for the lazily-expanding tree. Costs one
+    // shallow host.browse_directory call regardless of workspace size,
+    // unlike listTree's recursive host.list_paths walk.
+    async listDirectory({ threadId, path }: { threadId: string; path: string }) {
+      const environment = await target(threadId);
+      const resolved = resolveProjectPath(environment.rootPath, path, {
+        allowEmpty: true,
+      });
+      const result = await bb.sdk.hosts.directory({
+        hostId: environment.hostId,
+        path: resolved.absolutePath,
+      });
+      const entries: TreeEntryLike[] = result.entries.map((entry) => ({
+        kind: entry.kind,
+        path: joinProjectPaths(resolved.relativePath, entry.name),
+        name: entry.name,
+        score: 0,
+        positions: [],
+      }));
+
+      if (resolved.relativePath.length > 0) {
+        return { path: resolved.relativePath, entries };
+      }
+
+      await appendRootDotfileProbes(bb, environment, entries);
+
+      const { plugins } = await bb.sdk.plugins.list();
+      const annotate = plugins.find((plugin) => plugin.id === "md-annotate");
+
+      return {
+        path: "",
+        entries,
+        rootName: projectBasename(environment.rootPath),
         annotateAvailable:
           annotate?.status === "running" &&
           annotate.app.hasApp &&
