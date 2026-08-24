@@ -87,6 +87,24 @@ export const filesRpcContract = defineRpcContract({
       })
       .strict(),
   },
+  // Single-level directory listing for the lazily-expanding tree. Unlike
+  // listTree (a recursive walk used only for search), this reads exactly one
+  // directory so expanding a folder costs one shallow call instead of
+  // re-scanning the whole workspace.
+  listDirectory: {
+    input: z
+      .object({ threadId: threadIdSchema, path: z.string() })
+      .strict(),
+    output: z
+      .object({
+        path: z.string(),
+        entries: z.array(treeEntrySchema),
+        // Present only for the root ("") listing.
+        rootName: z.string().min(1).optional(),
+        annotateAvailable: z.boolean().optional(),
+      })
+      .strict(),
+  },
   readFile: {
     input: z
       .object({ threadId: threadIdSchema, path: targetPathSchema })
