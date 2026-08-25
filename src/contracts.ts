@@ -84,6 +84,7 @@ export const filesRpcContract = defineRpcContract({
         entries: z.array(treeEntrySchema),
         truncated: z.boolean(),
         annotateAvailable: z.boolean(),
+        sqlAvailable: z.boolean(),
       })
       .strict(),
   },
@@ -102,6 +103,7 @@ export const filesRpcContract = defineRpcContract({
         // Present only for the root ("") listing.
         rootName: z.string().min(1).optional(),
         annotateAvailable: z.boolean().optional(),
+        sqlAvailable: z.boolean().optional(),
       })
       .strict(),
   },

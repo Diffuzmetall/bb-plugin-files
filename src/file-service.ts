@@ -29,6 +29,31 @@ interface TreeEntryLike {
   positions: number[];
 }
 
+/** Совместимый UI-бандл плагина готов принимать file-open через host. */
+async function pluginUiAvailable(
+  bb: BbPluginApi,
+  pluginId: string,
+): Promise<boolean> {
+  const { plugins } = await bb.sdk.plugins.list();
+  const plugin = plugins.find((entry) => entry.id === pluginId);
+  return (
+    plugin?.status === "running" &&
+    plugin.app.hasApp &&
+    plugin.app.bundle?.compatible === true
+  );
+}
+
+async function openerPluginFlags(bb: BbPluginApi): Promise<{
+  annotateAvailable: boolean;
+  sqlAvailable: boolean;
+}> {
+  const [annotateAvailable, sqlAvailable] = await Promise.all([
+    pluginUiAvailable(bb, "md-annotate"),
+    pluginUiAvailable(bb, "sql"),
+  ]);
+  return { annotateAvailable, sqlAvailable };
+}
+
 /**
  * host.list_paths/browse_directory both hide dotfiles, but common config
  * dotfiles are still worth surfacing at the workspace root. Probes each by
@@ -142,17 +167,13 @@ export function createFileService(bb: BbPluginApi) {
         await appendRootDotfileProbes(bb, environment, entries);
       }
 
-      const { plugins } = await bb.sdk.plugins.list();
-      const annotate = plugins.find((plugin) => plugin.id === "md-annotate");
+      const openerFlags = await openerPluginFlags(bb);
 
       return {
         rootName: projectBasename(environment.rootPath),
         entries,
         truncated: result.truncated,
-        annotateAvailable:
-          annotate?.status === "running" &&
-          annotate.app.hasApp &&
-          annotate.app.bundle?.compatible === true,
+        ...openerFlags,
       };
     },
 
@@ -182,17 +203,13 @@ export function createFileService(bb: BbPluginApi) {
 
       await appendRootDotfileProbes(bb, environment, entries);
 
-      const { plugins } = await bb.sdk.plugins.list();
-      const annotate = plugins.find((plugin) => plugin.id === "md-annotate");
+      const openerFlags = await openerPluginFlags(bb);
 
       return {
         path: "",
         entries,
         rootName: projectBasename(environment.rootPath),
-        annotateAvailable:
-          annotate?.status === "running" &&
-          annotate.app.hasApp &&
-          annotate.app.bundle?.compatible === true,
+        ...openerFlags,
       };
     },
 

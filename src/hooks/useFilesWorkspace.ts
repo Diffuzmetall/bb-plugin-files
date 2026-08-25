@@ -174,6 +174,7 @@ export function useFilesWorkspace(initialPath: string | null = null) {
   const [treeError, setTreeError] = useState<string | null>(null);
   const [truncated, setTruncated] = useState(false);
   const [annotateAvailable, setAnnotateAvailable] = useState(false);
+  const [sqlAvailable, setSqlAvailable] = useState(false);
 
   const entries = useMemo(
     () => (query.length > 0 ? searchEntries : Array.from(childrenByDir.values()).flat()),
@@ -294,6 +295,7 @@ export function useFilesWorkspace(initialPath: string | null = null) {
         });
         if (result.rootName !== undefined) setRootName(result.rootName);
         if (result.annotateAvailable !== undefined) setAnnotateAvailable(result.annotateAvailable);
+        if (result.sqlAvailable !== undefined) setSqlAvailable(result.sqlAvailable);
         if (!silent) setTreeError(null);
         return true;
       } catch (error) {
@@ -356,6 +358,7 @@ export function useFilesWorkspace(initialPath: string | null = null) {
           setSearchEntries(result.entries);
           setTruncated(result.truncated);
           setAnnotateAvailable(result.annotateAvailable === true);
+          setSqlAvailable(result.sqlAvailable === true);
           setTreeError(null);
           return true;
         }
@@ -784,6 +787,7 @@ export function useFilesWorkspace(initialPath: string | null = null) {
       tabs,
       activePath,
       annotateAvailable,
+      sqlAvailable,
       setActivePath: selectPath,
       closeFile,
       createDirectory,
@@ -814,6 +818,7 @@ export function useFilesWorkspace(initialPath: string | null = null) {
       tabs,
       activePath,
       annotateAvailable,
+      sqlAvailable,
       selectPath,
       closeFile,
       createDirectory,

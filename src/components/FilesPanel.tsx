@@ -130,12 +130,16 @@ function FilesPanelContent({ initialPath }: { initialPath: string | null }) {
     });
   };
 
-  const openInAnnotate = (path: string) =>
+  const openInPreferred = (path: string) =>
     void workspace.openInPreferredViewer(path);
 
   const handleAction = (action: FileAction, entry: FileTreeEntry) => {
-    if (action === "annotate") {
-      openInAnnotate(entry.path);
+    if (
+      action === "annotate" ||
+      action === "open-sql" ||
+      action === "open-preferred"
+    ) {
+      openInPreferred(entry.path);
       return;
     }
     if (action === "copy-path") {
@@ -182,6 +186,7 @@ function FilesPanelContent({ initialPath }: { initialPath: string | null }) {
       selectedPath={workspace.activePath}
       setQuery={workspace.setQuery}
       showAnnotate={workspace.annotateAvailable}
+      showSql={workspace.sqlAvailable}
       truncated={workspace.truncated}
     />
   );
@@ -197,8 +202,11 @@ function FilesPanelContent({ initialPath }: { initialPath: string | null }) {
       onReload={(path) => void workspace.reloadFile(path)}
       onSave={(path) => void workspace.save(path)}
       onDownload={(path) => void workspace.downloadPath(path)}
-      onOpenInAnnotate={openInAnnotate}
+      onOpenInAnnotate={openInPreferred}
       showAnnotate={workspace.annotateAvailable}
+      onOpenInSql={openInPreferred}
+      showSql={workspace.sqlAvailable}
+      onOpenPreferred={openInPreferred}
       onToggleSidebar={() => setIsSidebarOpen((prev) => !prev)}
       isSidebarOpen={isSidebarOpen}
       getDownloadUrl={workspace.getDownloadUrl}
