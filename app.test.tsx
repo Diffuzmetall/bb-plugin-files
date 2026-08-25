@@ -75,7 +75,7 @@ describe("Files plugin app", () => {
             positions: [],
           },
         ],
-        annotateAvailable: false,
+        annotateAvailable: false, sqlAvailable: false,
       }),
       readFile: () => ({
         state: "text",
@@ -114,7 +114,7 @@ describe("Files plugin app", () => {
             positions: [],
           },
         ],
-        annotateAvailable: true,
+        annotateAvailable: true, sqlAvailable: false,
       }),
       readFile: () => ({
         state: "text",
@@ -147,7 +147,7 @@ describe("Files plugin app", () => {
     );
     const { renderHook } = await import("@testing-library/react");
     setRpcHandlers({
-      listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false }),
+      listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false, sqlAvailable: false }),
       readFile: (input: unknown) => {
         const path =
           typeof input === "object" &&
@@ -196,7 +196,7 @@ describe("Files plugin app", () => {
     const { useFilesWorkspace } = await import("./src/hooks/useFilesWorkspace");
     const { renderHook } = await import("@testing-library/react");
     setRpcHandlers({
-      listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false }),
+      listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false, sqlAvailable: false }),
       readFile: (input: unknown) => ({ state: "text", path: (input as { path: string }).path, sha256: "sha", sizeBytes: 1, mimeType: null, modifiedAtMs: null, content: "x" }),
     });
     setBbContext({ projectId: "project-a", threadId: "thread-1" });
@@ -259,7 +259,7 @@ describe("Files plugin app", () => {
   it("focuses an existing tab for the same source and path", async () => {
     const { useFilesWorkspace } = await import("./src/hooks/useFilesWorkspace");
     const { renderHook } = await import("@testing-library/react");
-    setRpcHandlers({ listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false }), readFile: () => ({ state: "text", path: "README.md", sha256: "sha", sizeBytes: 1, mimeType: null, modifiedAtMs: null, content: "x" }) });
+    setRpcHandlers({ listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false, sqlAvailable: false }), readFile: () => ({ state: "text", path: "README.md", sha256: "sha", sizeBytes: 1, mimeType: null, modifiedAtMs: null, content: "x" }) });
     const hook = renderHook(() => useFilesWorkspace());
     await act(async () => { await hook.result.current.openPath("README.md"); await hook.result.current.openPath("README.md"); });
     expect(hook.result.current.tabs).toHaveLength(1);
@@ -276,7 +276,7 @@ describe("Files plugin app", () => {
 
   it("resets panel state when the trusted host source changes", async () => {
     setRpcHandlers({
-      listDirectory: () => ({ path: "", rootName: "repo", entries: [{ kind: "file", path: "README.md", name: "README.md", score: 0, positions: [] }], annotateAvailable: false }),
+      listDirectory: () => ({ path: "", rootName: "repo", entries: [{ kind: "file", path: "README.md", name: "README.md", score: 0, positions: [] }], annotateAvailable: false, sqlAvailable: false }),
       readFile: () => ({ state: "text", path: "README.md", sha256: "sha", sizeBytes: 1, mimeType: null, modifiedAtMs: null, content: "x" }),
     });
     const view = render(<FilesPanel threadId="thread-1" params={null} />);
@@ -291,7 +291,7 @@ describe("Files plugin app", () => {
     const { useFilesWorkspace } = await import("./src/hooks/useFilesWorkspace");
     const { renderHook } = await import("@testing-library/react");
     setRpcHandlers({
-      listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false }),
+      listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false, sqlAvailable: false }),
       readFile: (input: unknown) => {
         const path = (input as { path: string }).path;
         return { state: "text", path, sha256: path, sizeBytes: 1, mimeType: null, modifiedAtMs: null, content: path };
@@ -313,7 +313,7 @@ describe("Files plugin app", () => {
     const { useFilesWorkspace } = await import("./src/hooks/useFilesWorkspace");
     const { renderHook } = await import("@testing-library/react");
     setRpcHandlers({
-      listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false }),
+      listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false, sqlAvailable: false }),
       readFile: (input: unknown) => ({ state: "text", path: (input as { path: string }).path, sha256: "sha", sizeBytes: 1, mimeType: null, modifiedAtMs: null, content: "saved" }),
     });
     const hook = renderHook(() => useFilesWorkspace());
@@ -332,7 +332,7 @@ describe("Files plugin app", () => {
     const { useFilesWorkspace } = await import("./src/hooks/useFilesWorkspace");
     const { renderHook } = await import("@testing-library/react");
     setRpcHandlers({
-      listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false }),
+      listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false, sqlAvailable: false }),
       readFile: (input: unknown) => ({ state: "text", path: (input as { path: string }).path, sha256: "sha", sizeBytes: 1, mimeType: null, modifiedAtMs: null, content: "saved" }),
       saveFile: () => ({ outcome: "conflict", currentSha256: "new-sha" }),
     });
@@ -352,7 +352,7 @@ describe("Files plugin app", () => {
     const { useFilesWorkspace } = await import("./src/hooks/useFilesWorkspace");
     const { renderHook } = await import("@testing-library/react");
     setRpcHandlers({
-      listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false }),
+      listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false, sqlAvailable: false }),
       readFile: (input: unknown) => ({ state: "text", path: (input as { path: string }).path, sha256: "sha", sizeBytes: 1, mimeType: null, modifiedAtMs: null, content: "saved" }),
     });
     const hook = renderHook(() => useFilesWorkspace());
@@ -373,7 +373,7 @@ describe("Files plugin app", () => {
     const { useFilesWorkspace } = await import("./src/hooks/useFilesWorkspace");
     const { renderHook } = await import("@testing-library/react");
     setRpcHandlers({
-      listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false }),
+      listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false, sqlAvailable: false }),
       readFile: (input: unknown) => {
         const path = (input as { path: string }).path;
         return { state: "text", path, sha256: path, sizeBytes: 1, mimeType: null, modifiedAtMs: null, content: path };
@@ -395,7 +395,7 @@ describe("Files plugin app", () => {
       "./src/hooks/useFilesWorkspace"
     );
     setRpcHandlers({
-      listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false }),
+      listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false, sqlAvailable: false }),
       readFile: () => ({
         state: "text",
         path: "README.md",
@@ -437,7 +437,7 @@ describe("Files plugin app", () => {
         return {
           path: "",
           rootName: "repo",
-          annotateAvailable: false,
+          annotateAvailable: false, sqlAvailable: false,
           entries: [{ kind: "directory", path: "src", name: "src", score: 0, positions: [] }],
         };
       }

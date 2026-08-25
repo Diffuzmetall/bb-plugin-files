@@ -43,10 +43,14 @@ function SaveLabel({ state, dirty }: { state: SaveState; dirty: boolean }) {
 
 export function getFileIconForEditor(name: string) {
   const lower = name.toLowerCase();
-  if (/\.(ts|tsx|js|jsx|json|css|scss|html|xml|yaml|yml|sh|bash)$/.test(lower)) return "Code";
+  if (/\.(ts|tsx|js|jsx|json|css|scss|html|xml|yaml|yml|sh|bash|sql)$/.test(lower)) return "Code";
   if (/\.(md|txt|csv|log)$/.test(lower)) return "FileText";
   if (/\.(png|jpg|jpeg|gif|svg|webp|ico|icns)$/.test(lower)) return "FileAttachment";
   return "File";
+}
+
+function isSqlPath(path: string): boolean {
+  return /\.sql$/iu.test(path);
 }
 
 export function EditorPane({
@@ -62,6 +66,9 @@ export function EditorPane({
   onDownload,
   onOpenInAnnotate,
   showAnnotate,
+  onOpenInSql,
+  showSql,
+  onOpenPreferred,
   onToggleSidebar,
   isSidebarOpen,
   getDownloadUrl,
@@ -78,6 +85,9 @@ export function EditorPane({
   onDownload(path: string): void;
   onOpenInAnnotate(path: string): void;
   showAnnotate: boolean;
+  onOpenInSql(path: string): void;
+  showSql: boolean;
+  onOpenPreferred(path: string): void;
   onToggleSidebar?(): void;
   isSidebarOpen?: boolean;
   getDownloadUrl(path: string): Promise<string>;
@@ -204,6 +214,26 @@ export function EditorPane({
           ) : null}
           {file !== null ? (
             <>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                aria-label="Open with preferred opener"
+                onClick={() => onOpenPreferred(activePath!)}
+              >
+                <Icon name="ExternalLink" className="h-3.5 w-3.5" />
+              </Button>
+              {showSql && isSqlPath(activePath ?? "") ? (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                  aria-label="Open in SQL"
+                  onClick={() => onOpenInSql(activePath!)}
+                >
+                  <Icon name="Terminal" className="h-3.5 w-3.5" />
+                </Button>
+              ) : null}
               {markdown && showAnnotate ? (
                 <Button
                   size="icon"

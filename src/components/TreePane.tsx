@@ -26,7 +26,7 @@ function depth(path: string): number {
 
 function getFileIcon(name: string): IconName {
   const lower = name.toLowerCase();
-  if (/\.(ts|tsx|js|jsx|json|css|scss|html|xml|yaml|yml|sh|bash)$/.test(lower)) return "Code";
+  if (/\.(ts|tsx|js|jsx|json|css|scss|html|xml|yaml|yml|sh|bash|sql)$/.test(lower)) return "Code";
   if (/\.(md|txt|csv|log)$/.test(lower)) return "FileText";
   if (/\.(png|jpg|jpeg|gif|svg|webp|ico|icns)$/.test(lower)) return "FileAttachment";
   return "File";
@@ -65,6 +65,7 @@ function TreeRow({
   onOpen,
   onToggle,
   showAnnotate,
+  showSql,
 }: {
   entry: FileTreeEntry;
   expanded: boolean;
@@ -73,6 +74,7 @@ function TreeRow({
   onOpen(path: string): void;
   onToggle(path: string): void;
   showAnnotate: boolean;
+  showSql: boolean;
 }) {
   const longPress = useLongPressContextMenu();
   const open = () =>
@@ -82,6 +84,7 @@ function TreeRow({
       entry={entry}
       onAction={onAction}
       showAnnotate={showAnnotate}
+      showSql={showSql}
     >
       <div
         role="treeitem"
@@ -168,6 +171,7 @@ export function TreePane({
   selectedPath,
   setQuery,
   showAnnotate,
+  showSql,
   truncated,
 }: {
   entries: FileTreeEntry[];
@@ -184,6 +188,7 @@ export function TreePane({
   selectedPath: string | null;
   setQuery(value: string): void;
   showAnnotate: boolean;
+  showSql: boolean;
   truncated: boolean;
 }) {
   const visibleEntries = useMemo(() => {
@@ -271,6 +276,7 @@ export function TreePane({
               onAction={onAction}
               onOpen={onOpen}
               showAnnotate={showAnnotate}
+              showSql={showSql}
               onToggle={onToggleDirectory}
             />
           ))
