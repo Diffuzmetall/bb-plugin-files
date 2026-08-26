@@ -41,6 +41,10 @@ current `^0.1.0` range are selected from those tags.
 - 10-second tree/file external-change polling;
 - create, rename (safely preserves unsaved drafts), duplicate, recursive delete, copy file content, copy relative path, and **download** actions;
 - optional **MD Annotate integration** for opening Markdown files in a review/commenting tab;
+- optional **SQL integration** for opening `.sql` files with the preferred host opener
+  ([yazydzhi/bb-plugin-sql](https://github.com/yazydzhi/bb-plugin-sql));
+- **Open with preferred…** on any file — reopens via BB’s host file flow so
+  **Settings → File openers** apply (the in-panel editor itself does not);
 - narrow panel navigation with a Back control;
 - symlinks and `node_modules` remain excluded by BB's host lister.
 
@@ -90,6 +94,30 @@ bb plugin install git:https://github.com/DarrenTsung/bb-plugin-md-annotate@main
 The integration intentionally uses BB's standard file-open flow. Consequently,
 if Annotate is installed but is not the configured default for that extension,
 the action opens whichever viewer the client selected instead.
+
+## SQL integration
+
+When a compatible, running `sql` plugin is detected, `.sql` files receive:
+
+- a terminal icon in the active file toolbar (**Open in SQL**);
+- **Open in SQL** in the file context menu.
+
+Every file also gets **Open with preferred…** (toolbar + context menu), which
+asks BB to reopen the workspace path through the host. That honors
+**Settings → File openers** (e.g. `.sql` → **SQL**). Clicking a file in the
+Files tree still uses Files’ built-in preview — use these actions to leave it.
+
+### Compatibility and setup (SQL)
+
+- BB `>=0.35.1` with Plugin SDK `^0.4.1`;
+- SQL plugin id `sql` with a compatible app bundle;
+- in **Settings → File openers**, set `.sql` to **SQL (sql)**.
+
+```bash
+bb plugin install git:https://github.com/yazydzhi/bb-plugin-sql.git@^0.1.0 --yes
+# or from a local checkout:
+# bb plugin install /path/to/bb-plugin-sql --yes
+```
 
 ## Hand-off / Current Status
 
