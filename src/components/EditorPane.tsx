@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { Markdown } from "@bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { CodeEditor } from "./CodeEditor";
 import { ExcalidrawEditor } from "./ExcalidrawEditor";
+import { MarkdownEditor } from "./MarkdownEditor";
 import type { SaveState, TabState } from "../hooks/useFilesWorkspace";
 
 function isMarkdown(path: string): boolean {
@@ -364,11 +364,14 @@ export function EditorPane({
                 </div>
               </div>
             ) : (markdown || isHtml) && mode === "preview" ? (
-              <div className="h-full overflow-y-auto bg-background">
+              <div className="h-full overflow-hidden bg-background">
                 {markdown ? (
-                  <div className="p-6">
-                    <Markdown content={draftText} />
-                  </div>
+                  <MarkdownEditor
+                    filePath={file.path}
+                    value={draftText}
+                    onChange={(value) => onChange(activePath!, value)}
+                    onSave={() => onSave(activePath!)}
+                  />
                 ) : (
                   <iframe 
                     src={previewSrc ?? "about:blank"} 
