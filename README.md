@@ -35,7 +35,7 @@ current `^0.1.0` range are selected from those tags.
 - **Depth-first tree rendering**: accurately reconstructs project hierarchy with auto-expansion of active file paths;
 - **Hidden files support**: dynamically probes and reveals common configuration dotfiles (e.g. `.env`, `.gitignore`, `.github`, `.vscode`, etc.) which are normally excluded by the host lister;
 - UTF-8 editing up to 2 MiB with CodeMirror 6;
-- BB-native Markdown **Preview**, editable **Raw** mode, **Image Previews**, and HTML previews in an inline iframe or separate browser tab;
+- directly editable WYSIWYG Markdown **Preview**, exact-source **Raw** mode, **Image Previews**, and HTML previews in an inline iframe or separate browser tab;
 - embedded Excalidraw editing for `.excalidraw` scenes, including theme synchronization and safe external links;
 - 700 ms autosave and Cmd/Ctrl+S;
 - SHA-based compare-and-swap with explicit Reload/Overwrite conflict handling;
@@ -129,7 +129,7 @@ This is a comprehensive summary of the current implementation for future mainten
 - **Persistence**: Tab paths and active tab selection are persisted in `localStorage` per `threadId`. Tabs are automatically re-hydrated on panel remount.
 - **UI Layout**: IDE-like layout with a resizable/collapsible file tree on the right and an editor on the left.
 - **Previews**:
-    - Markdown preview with the BB-native renderer.
+    - WYSIWYG Markdown preview with direct rendered-text editing and a Raw source fallback.
     - HTML preview with iframe refresh after save and an "Open preview" action.
     - Image preview for common formats.
 - **Editor Features**: 700ms autosave, SHA-based optimistic concurrency control (CAS) with conflict/overwrite UI, explicit download/copy actions.

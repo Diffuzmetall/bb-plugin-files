@@ -57,6 +57,8 @@ beforeEach(() => {
   );
   vi.stubGlobal("navigator", {
     ...navigator,
+    platform: navigator.platform,
+    userAgent: navigator.userAgent,
     clipboard: { writeText: vi.fn(async () => undefined) },
   });
 });
@@ -81,8 +83,15 @@ describe("Files plugin app", () => {
     expect(getCapturedPluginApp().threadPanelActions[0]).not.toHaveProperty("run");
   });
 
-  it("uses BB Markdown for Preview and exposes Raw", async () => {
+  it("opens Markdown in an editable Preview and exposes Raw", async () => {
+    const content = "# Project\n\nOriginal body.";
+    const saveFile = vi.fn((_input: unknown) => ({
+      outcome: "written" as const,
+      sha256: "sha-2",
+      sizeBytes: content.length,
+    }));
     setRpcHandlers({
+      saveFile,
       listDirectory: () => ({
         path: "",
         rootName: "repo",
@@ -95,26 +104,39 @@ describe("Files plugin app", () => {
             positions: [],
           },
         ],
-        annotateAvailable: false, sqlAvailable: false,
+        annotateAvailable: false,
+        sqlAvailable: false,
       }),
       readFile: () => ({
         state: "text",
         path: "README.md",
         sha256: "sha-1",
-        sizeBytes: 9,
+        sizeBytes: content.length,
         mimeType: "text/markdown",
         modifiedAtMs: 1,
-        content: "# Project",
+        content,
       }),
     });
     const view = render(<FilesPanel threadId="thread-1" params={null} />);
 
     const row = await view.findByRole("treeitem", { name: /README\.md/ });
     fireEvent.click(row);
-    expect(await view.findByRole("button", { name: "Raw" })).toBeTruthy();
-    expect((await view.findByTestId("native-markdown")).textContent).toBe(
-      "# Project",
-    );
+    const raw = await view.findByRole("button", { name: "Raw" });
+    const preview = await view.findByRole("textbox", {
+      name: "Editing preview of README.md",
+    });
+    expect(preview.textContent).toContain("Project");
+    const body = await view.findByText("Original body.");
+    body.textContent = "Updated body.";
+    fireEvent.input(body);
+    expect(await view.findByText("Unsaved")).toBeTruthy();
+    fireEvent.keyDown(preview, { key: "s", metaKey: true });
+    await waitFor(() => expect(saveFile).toHaveBeenCalled());
+    expect(saveFile.mock.calls.at(-1)?.[0]).toMatchObject({
+      content: "# Project\n\nUpdated body.",
+    });
+    fireEvent.click(raw);
+    expect(await view.findByLabelText("Editing README.md")).toBeTruthy();
     expect(view.queryByRole("button", { name: "Open in Annotate" })).toBeNull();
   });
 
