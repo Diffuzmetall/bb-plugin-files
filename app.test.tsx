@@ -1,7 +1,22 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FilesPanel } from "./app";
+
+vi.mock("@excalidraw/excalidraw", () => ({
+  Excalidraw: (props: {
+    onChange?: (elements: never[], appState: object, files: object) => void;
+  }) => {
+    useEffect(() => {
+      props.onChange?.([], {}, {});
+    }, [props.onChange]);
+    return <div data-testid="mock-files-excalidraw">Drawing</div>;
+  },
+  loadFromBlob: async () => ({ elements: [], appState: {}, files: {} }),
+  serializeAsJSON: () =>
+    JSON.stringify({ type: "excalidraw", elements: [], appState: {}, files: {} }),
+}));
 import {
   getCapturedPluginApp,
   setBbContext,
@@ -22,6 +37,10 @@ class TestResizeObserver {
 
 beforeEach(() => {
   setBbContext({ projectId: null, threadId: "thread-1" });
+  Object.defineProperty(Range.prototype, "getClientRects", {
+    configurable: true,
+    value: () => [],
+  });
   vi.stubGlobal("ResizeObserver", TestResizeObserver);
   vi.stubGlobal(
     "matchMedia",
@@ -45,6 +64,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
+  Reflect.deleteProperty(Range.prototype, "getClientRects");
   vi.unstubAllGlobals();
 });
 
@@ -141,6 +161,57 @@ describe("Files plugin app", () => {
     });
   });
 
+  it("opens .excalidraw files as a drawing instead of source JSON", async () => {
+    const content = JSON.stringify({
+      type: "excalidraw",
+      version: 2,
+      elements: [],
+      appState: {},
+      files: {},
+    });
+    const saveFile = vi.fn(() => ({
+      outcome: "written" as const,
+      sha256: "saved-scene-sha",
+      sizeBytes: content.length,
+    }));
+    setRpcHandlers({
+      listDirectory: () => ({
+        path: "",
+        rootName: "repo",
+        entries: [
+          {
+            kind: "file",
+            path: "AI+MAN.excalidraw",
+            name: "AI+MAN.excalidraw",
+            score: 0,
+            positions: [],
+          },
+        ],
+        annotateAvailable: false,
+        sqlAvailable: false,
+      }),
+      readFile: () => ({
+        state: "text",
+        path: "AI+MAN.excalidraw",
+        sha256: "scene-sha",
+        sizeBytes: content.length,
+        mimeType: "application/json",
+        modifiedAtMs: 1,
+        content,
+      }),
+      saveFile,
+    });
+    const view = render(<FilesPanel threadId="thread-1" params={null} />);
+
+    fireEvent.click(
+      await view.findByRole("treeitem", { name: /AI\+MAN\.excalidraw/ }),
+    );
+    expect(await view.findByTestId("mock-files-excalidraw")).toBeTruthy();
+    expect(view.queryByLabelText("Editing AI+MAN.excalidraw")).toBeNull();
+    await new Promise((resolve) => window.setTimeout(resolve, 800));
+    expect(saveFile).not.toHaveBeenCalled();
+  });
+
   it("restores open tabs after the Files panel remounts", async () => {
     const { useFilesWorkspace } = await import(
       "./src/hooks/useFilesWorkspace"
@@ -218,7 +289,9 @@ describe("Files plugin app", () => {
     const readFile = vi.fn();
     setBbContext({ projectId: null, threadId: null });
     setRpcHandlers({ listDirectory, readFile });
-    render(<FilesPanel path="README.md" source={source} />);
+    render(
+      <FilesPanel path="README.md" source={source} Original={() => null} />,
+    );
     await new Promise((resolve) => window.setTimeout(resolve, 250));
     expect(listDirectory).not.toHaveBeenCalled();
     expect(readFile).not.toHaveBeenCalled();

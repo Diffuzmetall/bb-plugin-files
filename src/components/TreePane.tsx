@@ -198,7 +198,7 @@ export function TreePane({
 
   return (
     <aside className="flex h-full min-h-0 min-w-0 flex-col bg-background">
-      <div className="flex h-[34px] shrink-0 items-center gap-0.5 border-b border-border-seam px-1.5">
+      <div className="flex h-[34px] shrink-0 items-center gap-0.5 px-1.5">
         <Icon name="FolderOpen" className="h-3.5 w-3.5" aria-hidden />
         <span className="min-w-0 flex-1 truncate text-xs font-medium">
           {rootName}
@@ -283,7 +283,7 @@ export function TreePane({
         )}
       </div>
       <div
-        className="shrink-0 border-t border-border-seam px-3 py-2 text-xs text-muted-foreground"
+        className="shrink-0 px-3 py-2 text-xs text-muted-foreground"
         role="status"
       >
         {entries.length} items

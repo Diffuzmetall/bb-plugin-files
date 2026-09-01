@@ -3,6 +3,7 @@ import { Markdown } from "@bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { CodeEditor } from "./CodeEditor";
+import { ExcalidrawEditor } from "./ExcalidrawEditor";
 import type { SaveState, TabState } from "../hooks/useFilesWorkspace";
 
 function isMarkdown(path: string): boolean {
@@ -44,6 +45,7 @@ function SaveLabel({ state, dirty }: { state: SaveState; dirty: boolean }) {
 export function getFileIconForEditor(name: string) {
   const lower = name.toLowerCase();
   if (/\.(ts|tsx|js|jsx|json|css|scss|html|xml|yaml|yml|sh|bash|sql)$/.test(lower)) return "Code";
+  if (/\.excalidraw$/.test(lower)) return "Edit";
   if (/\.(md|txt|csv|log)$/.test(lower)) return "FileText";
   if (/\.(png|jpg|jpeg|gif|svg|webp|ico|icns)$/.test(lower)) return "FileAttachment";
   return "File";
@@ -105,6 +107,8 @@ export function EditorPane({
 
   const markdown = file !== null && isMarkdown(file.path);
   const isHtml = file !== null && /\.(html|htm)$/i.test(file.path);
+  const isExcalidraw =
+    file?.state === "text" && /\.excalidraw$/i.test(file.path);
   const isImage = file !== null && file.state === "unsupported" && Boolean(file.mimeType?.startsWith("image/"));
   const previewSrc = previewUrl && file ? `${previewUrl}${previewUrl.includes("?") ? "&" : "?"}t=${encodeURIComponent(file.sha256)}` : null;
 
@@ -328,7 +332,14 @@ export function EditorPane({
           ) : null}
 
           <div className="min-h-0 flex-1 overflow-hidden relative">
-            {isImage ? (
+            {isExcalidraw ? (
+              <ExcalidrawEditor
+                content={draftText}
+                filePath={file.path}
+                onChange={(value) => onChange(activePath!, value)}
+                onSave={() => onSave(activePath!)}
+              />
+            ) : isImage ? (
               <div className="grid h-full place-items-center bg-[var(--canvas)] p-6 checkerboard-bg">
                 {previewUrl ? (
                   <img 
