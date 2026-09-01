@@ -36,6 +36,7 @@ current `^0.1.0` range are selected from those tags.
 - **Hidden files support**: dynamically probes and reveals common configuration dotfiles (e.g. `.env`, `.gitignore`, `.github`, `.vscode`, etc.) which are normally excluded by the host lister;
 - UTF-8 editing up to 2 MiB with CodeMirror 6;
 - BB-native Markdown **Preview**, editable **Raw** mode, **Image Previews**, and HTML previews in an inline iframe or separate browser tab;
+- embedded Excalidraw editing for `.excalidraw` scenes, including theme synchronization and safe external links;
 - 700 ms autosave and Cmd/Ctrl+S;
 - SHA-based compare-and-swap with explicit Reload/Overwrite conflict handling;
 - 10-second tree/file external-change polling;
