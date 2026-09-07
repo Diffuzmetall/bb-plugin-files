@@ -61,6 +61,92 @@ describe("Files plugin app", () => {
     expect(getCapturedPluginApp().threadPanelActions[0]).not.toHaveProperty("run");
   });
 
+  it("uploads files selected from the local file picker", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
+      const url = String(input);
+      return url.endsWith("/token") // ubs:ignore — test route suffix and fixture value are not credentials
+        ? new Response(JSON.stringify({ token: "plugin-token" }), { // ubs:ignore — inert test fixture
+            status: 200,
+            headers: { "content-type": "application/json" },
+          })
+        : new Response(
+            JSON.stringify({ path: "photo.png", sha256: "sha", sizeBytes: 3 }),
+            { status: 201, headers: { "content-type": "application/json" } },
+          );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    setRpcHandlers({
+      listTree: () => ({
+        rootName: "repo",
+        entries: [],
+        truncated: false,
+        annotateAvailable: false,
+      }),
+    });
+    const view = render(<FilesPanel threadId="thread-1" params={null} />);
+    await view.findByText("This workspace is empty.");
+
+    fireEvent.click(view.getByRole("button", { name: "Upload files" }));
+    const file = new File(["png"], "photo.png", { type: "image/png" });
+    fireEvent.change(view.getByLabelText("Choose files to upload"), {
+      target: { files: [file] },
+    });
+
+    expect(await view.findByText("Uploaded 1 file to workspace root.")).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain(
+      "/api/v1/plugins/files/http/upload?threadId=thread-1&directory=&fileName=photo.png",
+    );
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+      method: "POST",
+      body: file,
+    });
+  });
+
+  it("uploads dropped files into the target folder", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
+      const url = String(input);
+      return url.endsWith("/token") // ubs:ignore — test route suffix and fixture value are not credentials
+        ? new Response(JSON.stringify({ token: "plugin-token" }), { // ubs:ignore — inert test fixture
+            status: 200,
+            headers: { "content-type": "application/json" },
+          })
+        : new Response(
+            JSON.stringify({ path: "assets/notes.md", sha256: "sha", sizeBytes: 5 }),
+            { status: 201, headers: { "content-type": "application/json" } },
+          );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    setRpcHandlers({
+      listTree: () => ({
+        rootName: "repo",
+        entries: [
+          {
+            kind: "directory",
+            path: "assets",
+            name: "assets",
+            score: 0,
+            positions: [],
+          },
+        ],
+        truncated: false,
+        annotateAvailable: false,
+      }),
+    });
+    const view = render(<FilesPanel threadId="thread-1" params={null} />);
+    const folder = await view.findByRole("treeitem", { name: /assets/ });
+    const file = new File(["hello"], "notes.md", { type: "text/markdown" });
+    const dataTransfer = { files: [file], types: ["Files"], dropEffect: "none" };
+
+    fireEvent.dragOver(folder, { dataTransfer });
+    fireEvent.drop(folder, { dataTransfer });
+
+    expect(await view.findByText("Uploaded 1 file to assets.")).toBeTruthy();
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain(
+      "directory=assets&fileName=notes.md",
+    );
+  });
+
   it("uses BB Markdown for Preview and exposes Raw", async () => {
     setRpcHandlers({
       listTree: () => ({

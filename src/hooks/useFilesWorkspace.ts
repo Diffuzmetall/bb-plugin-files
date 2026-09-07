@@ -55,6 +55,7 @@ export interface TabState extends WorkspaceFileIdentity {
 const WORKSPACE_STORAGE_PREFIX = "bb-plugin-files:workspace:";
 const MAX_RESTORED_TABS = 20;
 const MAX_WORKSPACE_PATH_LENGTH = 4_096;
+const FILES_PLUGIN_HTTP_BASE = "/api/v1/plugins/files";
 
 interface StoredWorkspaceState {
   version: 2;
@@ -64,6 +65,55 @@ interface StoredWorkspaceState {
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function responseError(value: unknown, fallback: string): string {
+  return value && typeof value === "object" && "error" in value
+    ? String((value as { error: unknown }).error)
+    : fallback;
+}
+
+async function pluginToken(): Promise<string> {
+  const response = await fetch(`${FILES_PLUGIN_HTTP_BASE}/token`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  const json: unknown = await response.json().catch(() => null);
+  const token =
+    json && typeof json === "object" && "token" in json
+      ? (json as { token: unknown }).token
+      : null;
+  if (!response.ok || typeof token !== "string") { // ubs:ignore — validates the response type, not a secret value
+    throw new Error(
+      responseError(json, `Token request failed (HTTP ${response.status})`),
+    );
+  }
+  return token;
+}
+
+async function uploadFile(
+  threadId: string,
+  directory: string,
+  file: File,
+  token: string,
+): Promise<void> {
+  const query = new URLSearchParams({
+    threadId,
+    directory,
+    fileName: file.name,
+  });
+  const response = await fetch(`${FILES_PLUGIN_HTTP_BASE}/http/upload?${query}`, {
+    method: "POST",
+    headers: { "x-bb-plugin-token": token },
+    body: file,
+  });
+  const json: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(
+      responseError(json, `Upload failed (HTTP ${response.status})`),
+    );
+  }
 }
 
 function workspaceFileId(identity: WorkspaceFileIdentity): string {
@@ -641,6 +691,34 @@ export function useFilesWorkspace(initialPath: string | null = null) {
     [rpc, runMutation, threadId],
   );
 
+  const uploadFiles = useCallback(
+    async (directory: string, files: readonly File[]) => {
+      if (
+        !canRead ||
+        (directory.length > 0 && !isCanonicalWorkspacePath(directory))
+      ) {
+        return { ok: false as const, error: "Invalid upload destination." };
+      }
+      if (files.length === 0) return { ok: true as const, count: 0 };
+
+      let uploaded = 0;
+      try {
+        const token = await pluginToken();
+        for (const file of files) {
+          await uploadFile(threadId, directory, file, token);
+          uploaded += 1;
+        }
+        await refreshTree(query);
+        return { ok: true as const, count: uploaded };
+      } catch (error) {
+        if (uploaded > 0) await refreshTree(query);
+        const prefix = uploaded > 0 ? `Uploaded ${uploaded} of ${files.length}. ` : "";
+        return { ok: false as const, error: `${prefix}${message(error)}` };
+      }
+    },
+    [canRead, query, refreshTree, threadId],
+  );
+
   const getDownloadUrl = useCallback(
     async (path: string) => {
       if (!canRead || !isCanonicalWorkspacePath(path)) throw new Error("This file source is not available in the active workspace.");
@@ -707,6 +785,7 @@ export function useFilesWorkspace(initialPath: string | null = null) {
       treeError,
       treeLoading,
       truncated,
+      uploadFiles,
     }),
     [
       tabs,
@@ -734,6 +813,7 @@ export function useFilesWorkspace(initialPath: string | null = null) {
       treeError,
       treeLoading,
       truncated,
+      uploadFiles,
     ],
   );
 }
