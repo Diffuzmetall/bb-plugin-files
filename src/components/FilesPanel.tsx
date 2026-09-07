@@ -83,6 +83,13 @@ function FilesPanelContent({ initialPath }: { initialPath: string | null }) {
   const [operation, setOperation] = useState<OperationRequest | null>(null);
   const [deleteEntry, setDeleteEntry] = useState<FileTreeEntry | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [uploadStatus, setUploadStatus] = useState<{
+    kind: "uploading" | "success" | "error";
+    message: string;
+  } | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+  const uploadDirectoryRef = useRef("");
+  const uploadPendingRef = useRef(false);
 
   const [sidebarWidth, setSidebarWidth] = useState(260);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -133,6 +140,35 @@ function FilesPanelContent({ initialPath }: { initialPath: string | null }) {
   const openInAnnotate = (path: string) =>
     void workspace.openInPreferredViewer(path);
 
+  const chooseUpload = (directory: string) => {
+    if (uploadPendingRef.current) return;
+    uploadDirectoryRef.current = directory;
+    uploadInputRef.current?.click();
+  };
+
+  const uploadFiles = async (directory: string, files: File[]) => {
+    if (uploadPendingRef.current || files.length === 0) return;
+    uploadPendingRef.current = true;
+    const destination = directory.length > 0 ? directory : "workspace root";
+    setUploadStatus({
+      kind: "uploading",
+      message: `Uploading ${files.length} ${files.length === 1 ? "file" : "files"} to ${destination}…`,
+    });
+    try {
+      const result = await workspace.uploadFiles(directory, files);
+      setUploadStatus(
+        result.ok
+          ? {
+              kind: "success",
+              message: `Uploaded ${result.count} ${result.count === 1 ? "file" : "files"} to ${destination}.`,
+            }
+          : { kind: "error", message: result.error },
+      );
+    } finally {
+      uploadPendingRef.current = false;
+    }
+  };
+
   const handleAction = (action: FileAction, entry: FileTreeEntry) => {
     if (action === "annotate") {
       openInAnnotate(entry.path);
@@ -144,6 +180,10 @@ function FilesPanelContent({ initialPath }: { initialPath: string | null }) {
     }
     if (action === "download") {
       void workspace.downloadPath(entry.path);
+      return;
+    }
+    if (action === "upload") {
+      chooseUpload(entry.path);
       return;
     }
     if (action === "delete") {
@@ -175,12 +215,15 @@ function FilesPanelContent({ initialPath }: { initialPath: string | null }) {
       onCreateRoot={(kind) => requestCreate(kind)}
       onOpen={(path) => void workspace.openPath(path)}
       onRefresh={() => void workspace.refreshTree()}
+      onUpload={(directory, files) => void uploadFiles(directory, files)}
+      onChooseUpload={chooseUpload}
       query={workspace.query}
       rootName={workspace.rootName}
       selectedPath={workspace.activePath}
       setQuery={workspace.setQuery}
       showAnnotate={workspace.annotateAvailable}
       truncated={workspace.truncated}
+      uploadStatus={uploadStatus}
     />
   );
   const editor = (
@@ -238,6 +281,19 @@ function FilesPanelContent({ initialPath }: { initialPath: string | null }) {
           )}
         </>
       )}
+
+      <input
+        ref={uploadInputRef}
+        type="file"
+        multiple
+        className="sr-only"
+        aria-label="Choose files to upload"
+        onChange={(event) => {
+          const files = Array.from(event.currentTarget.files ?? []);
+          event.currentTarget.value = "";
+          void uploadFiles(uploadDirectoryRef.current, files);
+        }}
+      />
 
       <OperationDialog
         request={operation}

@@ -3,6 +3,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type DragEvent as ReactDragEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,13 @@ import { type IconName } from "@/components/ui/icon";
 
 function depth(path: string): number {
   return path.split("/").length - 1;
+}
+
+function hasDraggedFiles(dataTransfer: DataTransfer): boolean {
+  return (
+    dataTransfer.files.length > 0 ||
+    Array.from(dataTransfer.types).includes("Files")
+  );
 }
 
 function getFileIcon(name: string): IconName {
@@ -66,6 +74,7 @@ function TreeRow({
   onAction,
   onOpen,
   onToggle,
+  onUpload,
   showAnnotate,
 }: {
   entry: FileTreeEntry;
@@ -74,9 +83,11 @@ function TreeRow({
   onAction(action: FileAction, entry: FileTreeEntry): void;
   onOpen(path: string): void;
   onToggle(path: string): void;
+  onUpload(directory: string, files: File[]): void;
   showAnnotate: boolean;
 }) {
   const longPress = useLongPressContextMenu();
+  const [dropActive, setDropActive] = useState(false);
   const open = () =>
     entry.kind === "directory" ? onToggle(entry.path) : onOpen(entry.path);
   return (
@@ -89,10 +100,32 @@ function TreeRow({
         role="treeitem"
         aria-expanded={entry.kind === "directory" ? expanded : undefined}
         aria-selected={selected}
-        className="group flex h-[22px] shrink-0 cursor-default items-center gap-[6px] pr-2 text-[13px] text-muted-foreground outline-none hover:bg-state-hover focus-visible:ring-1 focus-visible:ring-ring aria-selected:bg-state-active aria-selected:text-foreground transition-colors"
+        className={`group flex h-[22px] shrink-0 cursor-default items-center gap-[6px] pr-2 text-[13px] text-muted-foreground outline-none hover:bg-state-hover focus-visible:ring-1 focus-visible:ring-ring aria-selected:bg-state-active aria-selected:text-foreground transition-colors ${dropActive ? "bg-state-active ring-1 ring-inset ring-primary" : ""}`}
         style={{ paddingLeft: `${8 + depth(entry.path) * 12}px` }}
         tabIndex={0}
         onClick={open}
+        onDragOver={(event) => {
+          if (entry.kind !== "directory" || !hasDraggedFiles(event.dataTransfer)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          event.dataTransfer.dropEffect = "copy";
+          setDropActive(true);
+        }}
+        onDragLeave={(event) => {
+          if (
+            !event.currentTarget.contains(event.relatedTarget as Node | null)
+          ) {
+            setDropActive(false);
+          }
+        }}
+        onDrop={(event) => {
+          if (entry.kind !== "directory" || event.dataTransfer.files.length === 0) return;
+          event.preventDefault();
+          event.stopPropagation();
+          setDropActive(false);
+          if (!expanded) onToggle(entry.path);
+          onUpload(entry.path, Array.from(event.dataTransfer.files));
+        }}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
@@ -163,12 +196,15 @@ export function TreePane({
   onCreateRoot,
   onOpen,
   onRefresh,
+  onUpload,
+  onChooseUpload,
   query,
   rootName,
   selectedPath,
   setQuery,
   showAnnotate,
   truncated,
+  uploadStatus,
 }: {
   entries: FileTreeEntry[];
   error: string | null;
@@ -177,14 +213,18 @@ export function TreePane({
   onCreateRoot(kind: "file" | "directory"): void;
   onOpen(path: string): void;
   onRefresh(): void;
+  onUpload(directory: string, files: File[]): void;
+  onChooseUpload(directory: string): void;
   query: string;
   rootName: string;
   selectedPath: string | null;
   setQuery(value: string): void;
   showAnnotate: boolean;
   truncated: boolean;
+  uploadStatus: { kind: "uploading" | "success" | "error"; message: string } | null;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [rootDropActive, setRootDropActive] = useState(false);
 
   // Reveal a newly selected file by expanding every folder above it, so a
   // file created or opened inside a collapsed folder appears in the tree
@@ -235,6 +275,15 @@ export function TreePane({
           size="icon"
           variant="ghost"
           className="h-[26px] w-[26px]"
+          aria-label="Upload files"
+          onClick={() => onChooseUpload("")}
+        >
+          <Icon name="ArrowUp" className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-[26px] w-[26px]"
           aria-label="New file"
           onClick={() => onCreateRoot("file")}
         >
@@ -265,10 +314,27 @@ export function TreePane({
         />
       </div>
       <div
-        className="min-h-0 flex-1 overflow-y-auto px-1 pb-2"
+        className={`min-h-0 flex-1 overflow-y-auto px-1 pb-2 ${rootDropActive ? "bg-state-hover ring-1 ring-inset ring-primary" : ""}`}
         role="tree"
         aria-label="Project files"
-        aria-busy={loading}
+        aria-busy={loading || uploadStatus?.kind === "uploading"}
+        onDragOver={(event: ReactDragEvent<HTMLDivElement>) => {
+          if (!hasDraggedFiles(event.dataTransfer)) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+          setRootDropActive(true);
+        }}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+            setRootDropActive(false);
+          }
+        }}
+        onDrop={(event) => {
+          if (event.dataTransfer.files.length === 0) return;
+          event.preventDefault();
+          setRootDropActive(false);
+          onUpload("", Array.from(event.dataTransfer.files));
+        }}
       >
         {error ? (
           <div className="m-2 rounded-md border border-surface-destructive-border bg-surface-destructive p-3 text-sm text-destructive-text">
@@ -294,6 +360,7 @@ export function TreePane({
               selected={selectedPath === entry.path}
               onAction={onAction}
               onOpen={onOpen}
+              onUpload={onUpload}
               showAnnotate={showAnnotate}
               onToggle={(path) =>
                 setExpanded((current) => {
@@ -307,10 +374,15 @@ export function TreePane({
           ))
         )}
       </div>
-      <div
-        className="shrink-0 border-t border-border-seam px-3 py-2 text-xs text-muted-foreground"
-        role="status"
-      >
+      {uploadStatus ? (
+        <div
+          className={`shrink-0 border-t border-border-seam px-3 py-2 text-xs ${uploadStatus.kind === "error" ? "text-destructive-text" : "text-muted-foreground"}`}
+          role={uploadStatus.kind === "error" ? "alert" : "status"}
+        >
+          {uploadStatus.message}
+        </div>
+      ) : null}
+      <div className="shrink-0 border-t border-border-seam px-3 py-2 text-xs text-muted-foreground">
         {entries.length} items
         {truncated ? " · results truncated" : " · hidden files excluded"}
       </div>

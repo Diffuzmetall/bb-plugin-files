@@ -17,6 +17,7 @@ export type FileAction =
   | "delete"
   | "copy-path"
   | "download"
+  | "upload"
   | "annotate";
 
 export function FileContextMenu({
@@ -43,6 +44,9 @@ export function FileContextMenu({
               onSelect={() => onAction("create-directory", entry)}
             >
               <Icon name="FolderPlus" /> New folder
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => onAction("upload", entry)}>
+              <Icon name="ArrowUp" /> Upload files
             </ContextMenuItem>
             <ContextMenuSeparator />
           </>
