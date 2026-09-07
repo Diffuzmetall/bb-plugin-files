@@ -9,7 +9,7 @@ A standalone BB plugin that adds **Actions → Files** to every thread. The pane
 BB Files requires BB `>=0.35.1`. Install the current tagged release:
 
 ```bash
-bb plugin install 'git:https://github.com/Diffuzmetall/bb-plugin-files.git@v0.1.0' --yes
+bb plugin install 'git:https://github.com/Diffuzmetall/bb-plugin-files.git@v0.1.3' --yes
 ```
 
 After the plugin is listed in the BB Community marketplace, BB can report and
@@ -41,6 +41,7 @@ current `^0.1.0` range are selected from those tags.
 - SHA-based compare-and-swap with explicit Reload/Overwrite conflict handling;
 - 10-second tree/file external-change polling;
 - create, rename (safely preserves unsaved drafts), duplicate, recursive delete, copy file content, copy relative path, and **download** actions;
+- upload multiple local files to the workspace root or any folder through the picker, context menu, or drag and drop (25 MiB per file, create-only);
 - optional **MD Annotate integration** for opening Markdown files in a review/commenting tab;
 - optional **SQL integration** for opening `.sql` files with the preferred host opener
   ([yazydzhi/bb-plugin-sql](https://github.com/yazydzhi/bb-plugin-sql));
