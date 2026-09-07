@@ -18,23 +18,35 @@ export type FileAction =
   | "copy-path"
   | "download"
   | "upload"
-  | "annotate";
+  | "annotate"
+  | "open-sql"
+  | "open-preferred";
+
+function isMarkdownPath(path: string): boolean {
+  return /\.(?:md|mdx|markdown)$/iu.test(path);
+}
+
+function isSqlPath(path: string): boolean {
+  return /\.sql$/iu.test(path);
+}
 
 export function FileContextMenu({
   children,
   entry,
   onAction,
   showAnnotate,
+  showSql,
 }: {
   children: ReactNode;
   entry: FileTreeEntry;
   onAction(action: FileAction, entry: FileTreeEntry): void;
   showAnnotate: boolean;
+  showSql: boolean;
 }) {
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-      <ContextMenuContent className="w-48">
+      <ContextMenuContent className="w-56">
         {entry.kind === "directory" ? (
           <>
             <ContextMenuItem onSelect={() => onAction("create-file", entry)}>
@@ -52,7 +64,15 @@ export function FileContextMenu({
           </>
         ) : (
           <>
-            {showAnnotate && /\.(?:md|mdx|markdown)$/iu.test(entry.path) ? (
+            <ContextMenuItem onSelect={() => onAction("open-preferred", entry)}>
+              <Icon name="ExternalLink" /> Open with preferred…
+            </ContextMenuItem>
+            {showSql && isSqlPath(entry.path) ? (
+              <ContextMenuItem onSelect={() => onAction("open-sql", entry)}>
+                <Icon name="Terminal" /> Open in SQL
+              </ContextMenuItem>
+            ) : null}
+            {showAnnotate && isMarkdownPath(entry.path) ? (
               <ContextMenuItem onSelect={() => onAction("annotate", entry)}>
                 <Icon name="MessageSquare" /> Open in Annotate
               </ContextMenuItem>

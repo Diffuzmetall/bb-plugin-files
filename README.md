@@ -35,12 +35,17 @@ current `^0.1.0` range are selected from those tags.
 - **Depth-first tree rendering**: accurately reconstructs project hierarchy with auto-expansion of active file paths;
 - **Hidden files support**: dynamically probes and reveals common configuration dotfiles (e.g. `.env`, `.gitignore`, `.github`, `.vscode`, etc.) which are normally excluded by the host lister;
 - UTF-8 editing up to 2 MiB with CodeMirror 6;
-- BB-native Markdown **Preview**, editable **Raw** mode, **Image Previews**, and HTML previews in an inline iframe or separate browser tab;
+- directly editable WYSIWYG Markdown **Preview**, exact-source **Raw** mode, **Image Previews**, and HTML previews in an inline iframe or separate browser tab;
+- embedded Excalidraw editing for `.excalidraw` scenes, including theme synchronization and safe external links;
 - 700 ms autosave and Cmd/Ctrl+S;
 - SHA-based compare-and-swap with explicit Reload/Overwrite conflict handling;
 - 10-second tree/file external-change polling;
 - create, rename (safely preserves unsaved drafts), duplicate, recursive delete, copy file content, copy relative path, and **download** actions;
 - optional **MD Annotate integration** for opening Markdown files in a review/commenting tab;
+- optional **SQL integration** for opening `.sql` files with the preferred host opener
+  ([yazydzhi/bb-plugin-sql](https://github.com/yazydzhi/bb-plugin-sql));
+- **Open with preferred…** on any file — reopens via BB’s host file flow so
+  **Settings → File openers** apply (the in-panel editor itself does not);
 - narrow panel navigation with a Back control;
 - symlinks and `node_modules` remain excluded by BB's host lister.
 
@@ -91,6 +96,30 @@ The integration intentionally uses BB's standard file-open flow. Consequently,
 if Annotate is installed but is not the configured default for that extension,
 the action opens whichever viewer the client selected instead.
 
+## SQL integration
+
+When a compatible, running `sql` plugin is detected, `.sql` files receive:
+
+- a terminal icon in the active file toolbar (**Open in SQL**);
+- **Open in SQL** in the file context menu.
+
+Every file also gets **Open with preferred…** (toolbar + context menu), which
+asks BB to reopen the workspace path through the host. That honors
+**Settings → File openers** (e.g. `.sql` → **SQL**). Clicking a file in the
+Files tree still uses Files’ built-in preview — use these actions to leave it.
+
+### Compatibility and setup (SQL)
+
+- BB `>=0.35.1` with Plugin SDK `^0.4.1`;
+- SQL plugin id `sql` with a compatible app bundle;
+- in **Settings → File openers**, set `.sql` to **SQL (sql)**.
+
+```bash
+bb plugin install git:https://github.com/yazydzhi/bb-plugin-sql.git@^0.1.0 --yes
+# or from a local checkout:
+# bb plugin install /path/to/bb-plugin-sql --yes
+```
+
 ## Hand-off / Current Status
 
 This is a comprehensive summary of the current implementation for future maintenance and feature development.
@@ -100,7 +129,7 @@ This is a comprehensive summary of the current implementation for future mainten
 - **Persistence**: Tab paths and active tab selection are persisted in `localStorage` per `threadId`. Tabs are automatically re-hydrated on panel remount.
 - **UI Layout**: IDE-like layout with a resizable/collapsible file tree on the right and an editor on the left.
 - **Previews**:
-    - Markdown preview with the BB-native renderer.
+    - WYSIWYG Markdown preview with direct rendered-text editing and a Raw source fallback.
     - HTML preview with iframe refresh after save and an "Open preview" action.
     - Image preview for common formats.
 - **Editor Features**: 700ms autosave, SHA-based optimistic concurrency control (CAS) with conflict/overwrite UI, explicit download/copy actions.

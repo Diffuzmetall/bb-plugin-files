@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Markdown } from "@bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { CodeEditor } from "./CodeEditor";
+import { ExcalidrawEditor } from "./ExcalidrawEditor";
+import { MarkdownEditor } from "./MarkdownEditor";
 import type { SaveState, TabState } from "../hooks/useFilesWorkspace";
 
 function isMarkdown(path: string): boolean {
@@ -43,10 +44,15 @@ function SaveLabel({ state, dirty }: { state: SaveState; dirty: boolean }) {
 
 export function getFileIconForEditor(name: string) {
   const lower = name.toLowerCase();
-  if (/\.(ts|tsx|js|jsx|json|css|scss|html|xml|yaml|yml|sh|bash)$/.test(lower)) return "Code";
+  if (/\.(ts|tsx|js|jsx|json|css|scss|html|xml|yaml|yml|sh|bash|sql)$/.test(lower)) return "Code";
+  if (/\.excalidraw$/.test(lower)) return "Edit";
   if (/\.(md|txt|csv|log)$/.test(lower)) return "FileText";
   if (/\.(png|jpg|jpeg|gif|svg|webp|ico|icns)$/.test(lower)) return "FileAttachment";
   return "File";
+}
+
+function isSqlPath(path: string): boolean {
+  return /\.sql$/iu.test(path);
 }
 
 export function EditorPane({
@@ -62,6 +68,9 @@ export function EditorPane({
   onDownload,
   onOpenInAnnotate,
   showAnnotate,
+  onOpenInSql,
+  showSql,
+  onOpenPreferred,
   onToggleSidebar,
   isSidebarOpen,
   getDownloadUrl,
@@ -78,6 +87,9 @@ export function EditorPane({
   onDownload(path: string): void;
   onOpenInAnnotate(path: string): void;
   showAnnotate: boolean;
+  onOpenInSql(path: string): void;
+  showSql: boolean;
+  onOpenPreferred(path: string): void;
   onToggleSidebar?(): void;
   isSidebarOpen?: boolean;
   getDownloadUrl(path: string): Promise<string>;
@@ -95,6 +107,8 @@ export function EditorPane({
 
   const markdown = file !== null && isMarkdown(file.path);
   const isHtml = file !== null && /\.(html|htm)$/i.test(file.path);
+  const isExcalidraw =
+    file?.state === "text" && /\.excalidraw$/i.test(file.path);
   const isImage = file !== null && file.state === "unsupported" && Boolean(file.mimeType?.startsWith("image/"));
   const previewSrc = previewUrl && file ? `${previewUrl}${previewUrl.includes("?") ? "&" : "?"}t=${encodeURIComponent(file.sha256)}` : null;
 
@@ -204,6 +218,26 @@ export function EditorPane({
           ) : null}
           {file !== null ? (
             <>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                aria-label="Open with preferred opener"
+                onClick={() => onOpenPreferred(activePath!)}
+              >
+                <Icon name="ExternalLink" className="h-3.5 w-3.5" />
+              </Button>
+              {showSql && isSqlPath(activePath ?? "") ? (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                  aria-label="Open in SQL"
+                  onClick={() => onOpenInSql(activePath!)}
+                >
+                  <Icon name="Terminal" className="h-3.5 w-3.5" />
+                </Button>
+              ) : null}
               {markdown && showAnnotate ? (
                 <Button
                   size="icon"
@@ -298,7 +332,14 @@ export function EditorPane({
           ) : null}
 
           <div className="min-h-0 flex-1 overflow-hidden relative">
-            {isImage ? (
+            {isExcalidraw ? (
+              <ExcalidrawEditor
+                content={draftText}
+                filePath={file.path}
+                onChange={(value) => onChange(activePath!, value)}
+                onSave={() => onSave(activePath!)}
+              />
+            ) : isImage ? (
               <div className="grid h-full place-items-center bg-[var(--canvas)] p-6 checkerboard-bg">
                 {previewUrl ? (
                   <img 
@@ -323,11 +364,14 @@ export function EditorPane({
                 </div>
               </div>
             ) : (markdown || isHtml) && mode === "preview" ? (
-              <div className="h-full overflow-y-auto bg-background">
+              <div className="h-full overflow-hidden bg-background">
                 {markdown ? (
-                  <div className="p-6">
-                    <Markdown content={draftText} />
-                  </div>
+                  <MarkdownEditor
+                    filePath={file.path}
+                    value={draftText}
+                    onChange={(value) => onChange(activePath!, value)}
+                    onSave={() => onSave(activePath!)}
+                  />
                 ) : (
                   <iframe 
                     src={previewSrc ?? "about:blank"} 

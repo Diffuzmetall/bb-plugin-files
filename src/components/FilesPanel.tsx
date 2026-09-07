@@ -137,7 +137,7 @@ function FilesPanelContent({ initialPath }: { initialPath: string | null }) {
     });
   };
 
-  const openInAnnotate = (path: string) =>
+  const openInPreferred = (path: string) =>
     void workspace.openInPreferredViewer(path);
 
   const chooseUpload = (directory: string) => {
@@ -170,8 +170,12 @@ function FilesPanelContent({ initialPath }: { initialPath: string | null }) {
   };
 
   const handleAction = (action: FileAction, entry: FileTreeEntry) => {
-    if (action === "annotate") {
-      openInAnnotate(entry.path);
+    if (
+      action === "annotate" ||
+      action === "open-sql" ||
+      action === "open-preferred"
+    ) {
+      openInPreferred(entry.path);
       return;
     }
     if (action === "copy-path") {
@@ -210,6 +214,7 @@ function FilesPanelContent({ initialPath }: { initialPath: string | null }) {
     <TreePane
       entries={workspace.entries}
       error={workspace.treeError}
+      expandedDirs={workspace.expandedDirs}
       loading={workspace.treeLoading}
       onAction={handleAction}
       onCreateRoot={(kind) => requestCreate(kind)}
@@ -217,11 +222,13 @@ function FilesPanelContent({ initialPath }: { initialPath: string | null }) {
       onRefresh={() => void workspace.refreshTree()}
       onUpload={(directory, files) => void uploadFiles(directory, files)}
       onChooseUpload={chooseUpload}
+      onToggleDirectory={workspace.toggleDirectory}
       query={workspace.query}
       rootName={workspace.rootName}
       selectedPath={workspace.activePath}
       setQuery={workspace.setQuery}
       showAnnotate={workspace.annotateAvailable}
+      showSql={workspace.sqlAvailable}
       truncated={workspace.truncated}
       uploadStatus={uploadStatus}
     />
@@ -238,8 +245,11 @@ function FilesPanelContent({ initialPath }: { initialPath: string | null }) {
       onReload={(path) => void workspace.reloadFile(path)}
       onSave={(path) => void workspace.save(path)}
       onDownload={(path) => void workspace.downloadPath(path)}
-      onOpenInAnnotate={openInAnnotate}
+      onOpenInAnnotate={openInPreferred}
       showAnnotate={workspace.annotateAvailable}
+      onOpenInSql={openInPreferred}
+      showSql={workspace.sqlAvailable}
+      onOpenPreferred={openInPreferred}
       onToggleSidebar={() => setIsSidebarOpen((prev) => !prev)}
       isSidebarOpen={isSidebarOpen}
       getDownloadUrl={workspace.getDownloadUrl}
