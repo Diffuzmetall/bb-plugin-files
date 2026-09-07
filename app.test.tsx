@@ -1,7 +1,22 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FilesPanel } from "./app";
+
+vi.mock("@excalidraw/excalidraw", () => ({
+  Excalidraw: (props: {
+    onChange?: (elements: never[], appState: object, files: object) => void;
+  }) => {
+    useEffect(() => {
+      props.onChange?.([], {}, {});
+    }, [props.onChange]);
+    return <div data-testid="mock-files-excalidraw">Drawing</div>;
+  },
+  loadFromBlob: async () => ({ elements: [], appState: {}, files: {} }),
+  serializeAsJSON: () =>
+    JSON.stringify({ type: "excalidraw", elements: [], appState: {}, files: {} }),
+}));
 import {
   getCapturedPluginApp,
   setBbContext,
@@ -22,6 +37,10 @@ class TestResizeObserver {
 
 beforeEach(() => {
   setBbContext({ projectId: null, threadId: "thread-1" });
+  Object.defineProperty(Range.prototype, "getClientRects", {
+    configurable: true,
+    value: () => [],
+  });
   vi.stubGlobal("ResizeObserver", TestResizeObserver);
   vi.stubGlobal(
     "matchMedia",
@@ -38,6 +57,8 @@ beforeEach(() => {
   );
   vi.stubGlobal("navigator", {
     ...navigator,
+    platform: navigator.platform,
+    userAgent: navigator.userAgent,
     clipboard: { writeText: vi.fn(async () => undefined) },
   });
 });
@@ -45,6 +66,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
+  Reflect.deleteProperty(Range.prototype, "getClientRects");
   vi.unstubAllGlobals();
 });
 
@@ -76,11 +98,12 @@ describe("Files plugin app", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     setRpcHandlers({
-      listTree: () => ({
+      listDirectory: () => ({
+        path: "",
         rootName: "repo",
         entries: [],
-        truncated: false,
         annotateAvailable: false,
+        sqlAvailable: false,
       }),
     });
     const view = render(<FilesPanel threadId="thread-1" params={null} />);
@@ -118,20 +141,26 @@ describe("Files plugin app", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     setRpcHandlers({
-      listTree: () => ({
-        rootName: "repo",
-        entries: [
-          {
-            kind: "directory",
-            path: "assets",
-            name: "assets",
-            score: 0,
-            positions: [],
-          },
-        ],
-        truncated: false,
-        annotateAvailable: false,
-      }),
+      listDirectory: (input) => {
+        const path = (input as { path: string }).path;
+        return {
+          path,
+          rootName: "repo",
+          entries: path.length === 0
+            ? [
+                {
+                  kind: "directory" as const,
+                  path: "assets",
+                  name: "assets",
+                  score: 0,
+                  positions: [],
+                },
+              ]
+            : [],
+          annotateAvailable: false,
+          sqlAvailable: false,
+        };
+      },
     });
     const view = render(<FilesPanel threadId="thread-1" params={null} />);
     const folder = await view.findByRole("treeitem", { name: /assets/ });
@@ -147,9 +176,17 @@ describe("Files plugin app", () => {
     );
   });
 
-  it("uses BB Markdown for Preview and exposes Raw", async () => {
+  it("opens Markdown in an editable Preview and exposes Raw", async () => {
+    const content = "# Project\n\nOriginal body.";
+    const saveFile = vi.fn((_input: unknown) => ({
+      outcome: "written" as const,
+      sha256: "sha-2",
+      sizeBytes: content.length,
+    }));
     setRpcHandlers({
-      listTree: () => ({
+      saveFile,
+      listDirectory: () => ({
+        path: "",
         rootName: "repo",
         entries: [
           {
@@ -160,26 +197,39 @@ describe("Files plugin app", () => {
             positions: [],
           },
         ],
-        truncated: false,
+        annotateAvailable: false,
+        sqlAvailable: false,
       }),
       readFile: () => ({
         state: "text",
         path: "README.md",
         sha256: "sha-1",
-        sizeBytes: 9,
+        sizeBytes: content.length,
         mimeType: "text/markdown",
         modifiedAtMs: 1,
-        content: "# Project",
+        content,
       }),
     });
     const view = render(<FilesPanel threadId="thread-1" params={null} />);
 
     const row = await view.findByRole("treeitem", { name: /README\.md/ });
     fireEvent.click(row);
-    expect(await view.findByRole("button", { name: "Raw" })).toBeTruthy();
-    expect((await view.findByTestId("native-markdown")).textContent).toBe(
-      "# Project",
-    );
+    const raw = await view.findByRole("button", { name: "Raw" });
+    const preview = await view.findByRole("textbox", {
+      name: "Editing preview of README.md",
+    });
+    expect(preview.textContent).toContain("Project");
+    const body = await view.findByText("Original body.");
+    body.textContent = "Updated body.";
+    fireEvent.input(body);
+    expect(await view.findByText("Unsaved")).toBeTruthy();
+    fireEvent.keyDown(preview, { key: "s", metaKey: true });
+    await waitFor(() => expect(saveFile).toHaveBeenCalled());
+    expect(saveFile.mock.calls.at(-1)?.[0]).toMatchObject({
+      content: "# Project\n\nUpdated body.",
+    });
+    fireEvent.click(raw);
+    expect(await view.findByLabelText("Editing README.md")).toBeTruthy();
     expect(view.queryByRole("button", { name: "Open in Annotate" })).toBeNull();
   });
 
@@ -187,7 +237,8 @@ describe("Files plugin app", () => {
     const openFile = vi.fn(() => ({ delivered: 1 }));
     setRpcHandlers({
       openFile,
-      listTree: () => ({
+      listDirectory: () => ({
+        path: "",
         rootName: "repo",
         entries: [
           {
@@ -198,8 +249,7 @@ describe("Files plugin app", () => {
             positions: [],
           },
         ],
-        truncated: false,
-        annotateAvailable: true,
+        annotateAvailable: true, sqlAvailable: false,
       }),
       readFile: () => ({
         state: "text",
@@ -226,13 +276,64 @@ describe("Files plugin app", () => {
     });
   });
 
+  it("opens .excalidraw files as a drawing instead of source JSON", async () => {
+    const content = JSON.stringify({
+      type: "excalidraw",
+      version: 2,
+      elements: [],
+      appState: {},
+      files: {},
+    });
+    const saveFile = vi.fn(() => ({
+      outcome: "written" as const,
+      sha256: "saved-scene-sha",
+      sizeBytes: content.length,
+    }));
+    setRpcHandlers({
+      listDirectory: () => ({
+        path: "",
+        rootName: "repo",
+        entries: [
+          {
+            kind: "file",
+            path: "AI+MAN.excalidraw",
+            name: "AI+MAN.excalidraw",
+            score: 0,
+            positions: [],
+          },
+        ],
+        annotateAvailable: false,
+        sqlAvailable: false,
+      }),
+      readFile: () => ({
+        state: "text",
+        path: "AI+MAN.excalidraw",
+        sha256: "scene-sha",
+        sizeBytes: content.length,
+        mimeType: "application/json",
+        modifiedAtMs: 1,
+        content,
+      }),
+      saveFile,
+    });
+    const view = render(<FilesPanel threadId="thread-1" params={null} />);
+
+    fireEvent.click(
+      await view.findByRole("treeitem", { name: /AI\+MAN\.excalidraw/ }),
+    );
+    expect(await view.findByTestId("mock-files-excalidraw")).toBeTruthy();
+    expect(view.queryByLabelText("Editing AI+MAN.excalidraw")).toBeNull();
+    await new Promise((resolve) => window.setTimeout(resolve, 800));
+    expect(saveFile).not.toHaveBeenCalled();
+  });
+
   it("restores open tabs after the Files panel remounts", async () => {
     const { useFilesWorkspace } = await import(
       "./src/hooks/useFilesWorkspace"
     );
     const { renderHook } = await import("@testing-library/react");
     setRpcHandlers({
-      listTree: () => ({ rootName: "repo", entries: [], truncated: false }),
+      listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false, sqlAvailable: false }),
       readFile: (input: unknown) => {
         const path =
           typeof input === "object" &&
@@ -281,7 +382,7 @@ describe("Files plugin app", () => {
     const { useFilesWorkspace } = await import("./src/hooks/useFilesWorkspace");
     const { renderHook } = await import("@testing-library/react");
     setRpcHandlers({
-      listTree: () => ({ rootName: "repo", entries: [], truncated: false }),
+      listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false, sqlAvailable: false }),
       readFile: (input: unknown) => ({ state: "text", path: (input as { path: string }).path, sha256: "sha", sizeBytes: 1, mimeType: null, modifiedAtMs: null, content: "x" }),
     });
     setBbContext({ projectId: "project-a", threadId: "thread-1" });
@@ -299,20 +400,22 @@ describe("Files plugin app", () => {
     { kind: "workspace" as const, threadId: "thread-1", environmentId: "foreign-environment", projectId: null },
     { kind: "workspace" as const, threadId: "thread-1", environmentId: null, projectId: "foreign-project" },
   ])("does not authorize file-opener sources without a host context", async (source) => {
-    const listTree = vi.fn();
+    const listDirectory = vi.fn();
     const readFile = vi.fn();
     setBbContext({ projectId: null, threadId: null });
-    setRpcHandlers({ listTree, readFile });
-    render(<FilesPanel path="README.md" source={source} />);
+    setRpcHandlers({ listDirectory, readFile });
+    render(
+      <FilesPanel path="README.md" source={source} Original={() => null} />,
+    );
     await new Promise((resolve) => window.setTimeout(resolve, 250));
-    expect(listTree).not.toHaveBeenCalled();
+    expect(listDirectory).not.toHaveBeenCalled();
     expect(readFile).not.toHaveBeenCalled();
   });
 
   it("fails closed for unauthorized callback invocations", async () => {
     const { useFilesWorkspace } = await import("./src/hooks/useFilesWorkspace");
     const { renderHook } = await import("@testing-library/react");
-    const handlers = { openFile: vi.fn(), saveFile: vi.fn(), createFile: vi.fn(), createDirectory: vi.fn(), movePath: vi.fn(), removePath: vi.fn(), readFile: vi.fn(), listTree: vi.fn() };
+    const handlers = { openFile: vi.fn(), saveFile: vi.fn(), createFile: vi.fn(), createDirectory: vi.fn(), movePath: vi.fn(), removePath: vi.fn(), readFile: vi.fn(), listDirectory: vi.fn() };
     setRpcHandlers(handlers);
     setBbContext({ projectId: null, threadId: null });
     const hook = renderHook(() => useFilesWorkspace());
@@ -344,7 +447,7 @@ describe("Files plugin app", () => {
   it("focuses an existing tab for the same source and path", async () => {
     const { useFilesWorkspace } = await import("./src/hooks/useFilesWorkspace");
     const { renderHook } = await import("@testing-library/react");
-    setRpcHandlers({ listTree: () => ({ rootName: "repo", entries: [], truncated: false }), readFile: () => ({ state: "text", path: "README.md", sha256: "sha", sizeBytes: 1, mimeType: null, modifiedAtMs: null, content: "x" }) });
+    setRpcHandlers({ listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false, sqlAvailable: false }), readFile: () => ({ state: "text", path: "README.md", sha256: "sha", sizeBytes: 1, mimeType: null, modifiedAtMs: null, content: "x" }) });
     const hook = renderHook(() => useFilesWorkspace());
     await act(async () => { await hook.result.current.openPath("README.md"); await hook.result.current.openPath("README.md"); });
     expect(hook.result.current.tabs).toHaveLength(1);
@@ -361,7 +464,7 @@ describe("Files plugin app", () => {
 
   it("resets panel state when the trusted host source changes", async () => {
     setRpcHandlers({
-      listTree: () => ({ rootName: "repo", entries: [{ kind: "file", path: "README.md", name: "README.md", score: 0, positions: [] }], truncated: false }),
+      listDirectory: () => ({ path: "", rootName: "repo", entries: [{ kind: "file", path: "README.md", name: "README.md", score: 0, positions: [] }], annotateAvailable: false, sqlAvailable: false }),
       readFile: () => ({ state: "text", path: "README.md", sha256: "sha", sizeBytes: 1, mimeType: null, modifiedAtMs: null, content: "x" }),
     });
     const view = render(<FilesPanel threadId="thread-1" params={null} />);
@@ -376,7 +479,7 @@ describe("Files plugin app", () => {
     const { useFilesWorkspace } = await import("./src/hooks/useFilesWorkspace");
     const { renderHook } = await import("@testing-library/react");
     setRpcHandlers({
-      listTree: () => ({ rootName: "repo", entries: [], truncated: false }),
+      listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false, sqlAvailable: false }),
       readFile: (input: unknown) => {
         const path = (input as { path: string }).path;
         return { state: "text", path, sha256: path, sizeBytes: 1, mimeType: null, modifiedAtMs: null, content: path };
@@ -398,7 +501,7 @@ describe("Files plugin app", () => {
     const { useFilesWorkspace } = await import("./src/hooks/useFilesWorkspace");
     const { renderHook } = await import("@testing-library/react");
     setRpcHandlers({
-      listTree: () => ({ rootName: "repo", entries: [], truncated: false }),
+      listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false, sqlAvailable: false }),
       readFile: (input: unknown) => ({ state: "text", path: (input as { path: string }).path, sha256: "sha", sizeBytes: 1, mimeType: null, modifiedAtMs: null, content: "saved" }),
     });
     const hook = renderHook(() => useFilesWorkspace());
@@ -417,7 +520,7 @@ describe("Files plugin app", () => {
     const { useFilesWorkspace } = await import("./src/hooks/useFilesWorkspace");
     const { renderHook } = await import("@testing-library/react");
     setRpcHandlers({
-      listTree: () => ({ rootName: "repo", entries: [], truncated: false }),
+      listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false, sqlAvailable: false }),
       readFile: (input: unknown) => ({ state: "text", path: (input as { path: string }).path, sha256: "sha", sizeBytes: 1, mimeType: null, modifiedAtMs: null, content: "saved" }),
       saveFile: () => ({ outcome: "conflict", currentSha256: "new-sha" }),
     });
@@ -437,7 +540,7 @@ describe("Files plugin app", () => {
     const { useFilesWorkspace } = await import("./src/hooks/useFilesWorkspace");
     const { renderHook } = await import("@testing-library/react");
     setRpcHandlers({
-      listTree: () => ({ rootName: "repo", entries: [], truncated: false }),
+      listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false, sqlAvailable: false }),
       readFile: (input: unknown) => ({ state: "text", path: (input as { path: string }).path, sha256: "sha", sizeBytes: 1, mimeType: null, modifiedAtMs: null, content: "saved" }),
     });
     const hook = renderHook(() => useFilesWorkspace());
@@ -458,7 +561,7 @@ describe("Files plugin app", () => {
     const { useFilesWorkspace } = await import("./src/hooks/useFilesWorkspace");
     const { renderHook } = await import("@testing-library/react");
     setRpcHandlers({
-      listTree: () => ({ rootName: "repo", entries: [], truncated: false }),
+      listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false, sqlAvailable: false }),
       readFile: (input: unknown) => {
         const path = (input as { path: string }).path;
         return { state: "text", path, sha256: path, sizeBytes: 1, mimeType: null, modifiedAtMs: null, content: path };
@@ -480,7 +583,7 @@ describe("Files plugin app", () => {
       "./src/hooks/useFilesWorkspace"
     );
     setRpcHandlers({
-      listTree: () => ({ rootName: "repo", entries: [], truncated: false }),
+      listDirectory: () => ({ path: "", rootName: "repo", entries: [], annotateAvailable: false, sqlAvailable: false }),
       readFile: () => ({
         state: "text",
         path: "README.md",
@@ -511,5 +614,52 @@ describe("Files plugin app", () => {
     });
     expect(hook.result.current.tabs.find(t => t.path === "README.md")?.draftText).toBe("my draft");
     expect(hook.result.current.activePath).toBe("README.md");
+  });
+
+  it("lazily loads a directory's children on expand and drops them on collapse", async () => {
+    const { useFilesWorkspace } = await import("./src/hooks/useFilesWorkspace");
+    const { renderHook } = await import("@testing-library/react");
+    const listDirectory = vi.fn((input: unknown) => {
+      const path = (input as { path: string }).path;
+      if (path === "") {
+        return {
+          path: "",
+          rootName: "repo",
+          annotateAvailable: false, sqlAvailable: false,
+          entries: [{ kind: "directory", path: "src", name: "src", score: 0, positions: [] }],
+        };
+      }
+      if (path === "src") {
+        return {
+          path: "src",
+          entries: [{ kind: "file", path: "src/a.ts", name: "a.ts", score: 0, positions: [] }],
+        };
+      }
+      throw new Error(`unexpected listDirectory path: ${path}`);
+    });
+    setRpcHandlers({ listDirectory });
+    const hook = renderHook(() => useFilesWorkspace());
+
+    await waitFor(() => {
+      expect(hook.result.current.entries.map((entry) => entry.path)).toEqual(["src"]);
+    });
+    expect(hook.result.current.expandedDirs.has("src")).toBe(false);
+
+    await act(async () => {
+      hook.result.current.toggleDirectory("src");
+    });
+    await waitFor(() => {
+      expect(hook.result.current.entries.map((entry) => entry.path)).toEqual(
+        expect.arrayContaining(["src", "src/a.ts"]),
+      );
+    });
+    expect(hook.result.current.expandedDirs.has("src")).toBe(true);
+    expect(listDirectory).toHaveBeenCalledWith(expect.objectContaining({ path: "src" }));
+
+    // Collapsing drops the fetched children from state instead of merely
+    // hiding them, so re-expanding fetches fresh data.
+    act(() => hook.result.current.toggleDirectory("src"));
+    expect(hook.result.current.expandedDirs.has("src")).toBe(false);
+    expect(hook.result.current.entries.map((entry) => entry.path)).toEqual(["src"]);
   });
 });
