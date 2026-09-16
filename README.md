@@ -47,8 +47,38 @@ current `^0.1.0` range are selected from those tags.
   ([yazydzhi/bb-plugin-sql](https://github.com/yazydzhi/bb-plugin-sql));
 - **Open with preferred…** on any file — reopens via BB’s host file flow so
   **Settings → File openers** apply (the in-panel editor itself does not);
+- optional **file opener** for links from other surfaces — see
+  [Opening files from other plugins](#opening-files-from-other-plugins);
 - narrow panel navigation with a Back control;
 - symlinks and `node_modules` remain excluded by BB's host lister.
+
+## Opening files from other plugins
+
+BB Files registers itself as a file opener for text-like files, so a file link
+outside the panel — a terminal path in the Wterm terminal plugin, a Markdown
+link, a host-provided file tab — can land in this editor instead of BB's
+built-in preview:
+
+```ts
+app.slots.fileOpener({
+  id: "files",
+  title: "Files",
+  // Lowercase extensions without the dot.
+  extensions: ["md", "mdx", "txt", "ts", "tsx", …],
+  component: FilesPanel,
+});
+```
+
+The panel receives `{path, source, experimental_lineRange}` and opens that file
+in the active workspace, so a workspace or host path opens directly; when BB has
+no thread for the tab, the panel reports that the source is unavailable. Git-ref
+snapshots (diff views) always use BB's preview.
+
+BB renders the first applicable opener for an extension unless one is pinned,
+so installing the plugin adds a choice rather than changing the default: pick
+**Files** for an extension under **Settings → Files** to make it win, or use a
+file tab's **Open with** menu to override it once. **Automatic** restores the
+built-in choice.
 
 ## Development
 
