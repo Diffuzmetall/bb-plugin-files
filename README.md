@@ -9,7 +9,7 @@ A standalone BB plugin that adds a **Files** panel in two places: **Actions → 
 BB Files requires BB `>=0.35.1`. Install the current tagged release:
 
 ```bash
-bb plugin install 'git:https://github.com/Diffuzmetall/bb-plugin-files.git@v0.2.0' --yes
+bb plugin install 'git:https://github.com/Diffuzmetall/bb-plugin-files.git@v0.2.1' --yes
 ```
 
 After the plugin is listed in the BB Community marketplace, BB can report and
@@ -69,6 +69,11 @@ app.slots.fileOpener({
   component: FilesPanel,
 });
 ```
+
+The registered list covers source, configuration, markup, and picture formats —
+80 extensions, kept in [`src/file-opener-extensions.ts`](src/file-opener-extensions.ts).
+Formats the panel has no renderer for (PDF, archives, audio, video) stay with
+BB's built-in preview.
 
 The panel receives `{path, source, experimental_lineRange}` and opens that file
 inside the active workspace; when BB has no thread for the tab, the panel reports
