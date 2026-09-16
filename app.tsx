@@ -7,6 +7,16 @@ export { FilesPanel } from "./src/components/FilesPanel";
 export { FILE_OPENER_EXTENSIONS } from "./src/file-opener-extensions";
 
 export default definePluginApp((app) => {
+  // The left-sidebar entry. Its route carries no thread, so it browses the
+  // global root — this machine's home directory — and works outside a repo.
+  app.slots.navPanel({
+    id: "files",
+    title: "Files",
+    icon: "FolderOpen",
+    path: "files",
+    component: FilesPanel,
+  });
+  // The same panel inside one thread, bound to that thread's workspace.
   app.slots.threadPanelAction({
     id: "files",
     title: "Files",

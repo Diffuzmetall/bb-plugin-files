@@ -27,6 +27,7 @@ describe("workspace uploads", () => {
       body: bytes,
     });
     const query = new URLSearchParams({
+      scope: "thread",
       threadId: "thread-1",
       directory: "assets",
       fileName: "notes.md",

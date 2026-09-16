@@ -35,12 +35,15 @@ export function FileContextMenu({
   entry,
   onAction,
   showAnnotate,
+  showOpenPreferred,
   showSql,
 }: {
   children: ReactNode;
   entry: FileTreeEntry;
   onAction(action: FileAction, entry: FileTreeEntry): void;
   showAnnotate: boolean;
+  /** False where BB has no thread tab to open the file into. */
+  showOpenPreferred: boolean;
   showSql: boolean;
 }) {
   return (
@@ -64,9 +67,11 @@ export function FileContextMenu({
           </>
         ) : (
           <>
-            <ContextMenuItem onSelect={() => onAction("open-preferred", entry)}>
-              <Icon name="ExternalLink" /> Open with preferred…
-            </ContextMenuItem>
+            {showOpenPreferred ? (
+              <ContextMenuItem onSelect={() => onAction("open-preferred", entry)}>
+                <Icon name="ExternalLink" /> Open with preferred…
+              </ContextMenuItem>
+            ) : null}
             {showSql && isSqlPath(entry.path) ? (
               <ContextMenuItem onSelect={() => onAction("open-sql", entry)}>
                 <Icon name="Terminal" /> Open in SQL

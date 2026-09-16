@@ -2,6 +2,7 @@ import { useState, useRef } from "react";
 import {
   useBbContext,
   type PluginFileOpenerProps,
+  type PluginNavPanelProps,
   type PluginThreadPanelProps,
 } from "@bb/plugin-sdk/app";
 import {
@@ -19,8 +20,10 @@ import type { FileAction } from "./FileContextMenu";
 import { OperationDialog, type OperationRequest } from "./OperationDialog";
 import { TreePane } from "./TreePane";
 import {
+  FILE_SOURCE_UNAVAILABLE,
   useFilesWorkspace,
   type FileTreeEntry,
+  type FilesRootScope,
 } from "../hooks/useFilesWorkspace";
 import { useResponsiveLayout } from "../hooks/useResponsiveLayout";
 
@@ -45,7 +48,10 @@ function duplicateSuggestion(entry: FileTreeEntry): string {
   return childPath(parent, name);
 }
 
-type FilesPanelProps = PluginThreadPanelProps | PluginFileOpenerProps;
+type FilesPanelProps =
+  | PluginThreadPanelProps
+  | PluginFileOpenerProps
+  | PluginNavPanelProps;
 
 function isFileOpenerProps(
   props: FilesPanelProps,
@@ -53,32 +59,51 @@ function isFileOpenerProps(
   return "source" in props;
 }
 
+/** The left-sidebar entry owns its own route and carries no thread. */
+function isNavPanelProps(props: FilesPanelProps): props is PluginNavPanelProps {
+  return "subPath" in props;
+}
+
 export function FilesPanel(props: FilesPanelProps) {
   const context = useBbContext();
   const opener = isFileOpenerProps(props);
-  // The host context and server-side thread-environment resolution are the
-  // authorization boundary. Opener and panel props are persisted input only.
-  if (context.threadId === null) {
+  const rootScope: FilesRootScope = isNavPanelProps(props) ? "host" : "thread";
+  // The host context and server-side root resolution are the authorization
+  // boundary. Opener and panel props are persisted input only.
+  if (rootScope === "thread" && context.threadId === null) {
     return (
       <div
         className="grid h-full place-items-center p-6 text-sm text-muted-foreground"
         role="alert"
       >
-        This file source is not available in the active workspace.
+        {FILE_SOURCE_UNAVAILABLE}
       </div>
     );
   }
-  const sourceKey = JSON.stringify([context.threadId, context.projectId]);
+  const sourceKey =
+    rootScope === "host"
+      ? "host-root"
+      : JSON.stringify([context.threadId, context.projectId]);
   return (
     <FilesPanelContent
       key={sourceKey}
       initialPath={opener ? props.path : null}
+      rootScope={rootScope}
     />
   );
 }
 
-function FilesPanelContent({ initialPath }: { initialPath: string | null }) {
-  const workspace = useFilesWorkspace(initialPath);
+function FilesPanelContent({
+  initialPath,
+  rootScope,
+}: {
+  initialPath: string | null;
+  rootScope: FilesRootScope;
+}) {
+  const workspace = useFilesWorkspace(initialPath, rootScope);
+  // Opening a file in BB's own preview needs a thread tab, so the global root
+  // keeps that action out of its menus.
+  const showOpenPreferred = rootScope === "thread";
   const { containerRef, containerNode, isNarrow } = useResponsiveLayout();
   const [operation, setOperation] = useState<OperationRequest | null>(null);
   const [deleteEntry, setDeleteEntry] = useState<FileTreeEntry | null>(null);
@@ -149,7 +174,7 @@ function FilesPanelContent({ initialPath }: { initialPath: string | null }) {
   const uploadFiles = async (directory: string, files: File[]) => {
     if (uploadPendingRef.current || files.length === 0) return;
     uploadPendingRef.current = true;
-    const destination = directory.length > 0 ? directory : "workspace root";
+    const destination = directory.length > 0 ? directory : "the root";
     setUploadStatus({
       kind: "uploading",
       message: `Uploading ${files.length} ${files.length === 1 ? "file" : "files"} to ${destination}…`,
@@ -228,6 +253,7 @@ function FilesPanelContent({ initialPath }: { initialPath: string | null }) {
       selectedPath={workspace.activePath}
       setQuery={workspace.setQuery}
       showAnnotate={workspace.annotateAvailable}
+      showOpenPreferred={showOpenPreferred}
       showSql={workspace.sqlAvailable}
       truncated={workspace.truncated}
       uploadStatus={uploadStatus}
@@ -247,6 +273,7 @@ function FilesPanelContent({ initialPath }: { initialPath: string | null }) {
       onDownload={(path) => void workspace.downloadPath(path)}
       onOpenInAnnotate={openInPreferred}
       showAnnotate={workspace.annotateAvailable}
+      showOpenPreferred={showOpenPreferred}
       onOpenInSql={openInPreferred}
       showSql={workspace.sqlAvailable}
       onOpenPreferred={openInPreferred}

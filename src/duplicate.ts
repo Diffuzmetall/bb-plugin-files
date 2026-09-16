@@ -1,6 +1,6 @@
 import type { BbPluginApi } from "@bb/plugin-sdk";
 import { joinProjectPaths, resolveProjectPath } from "./path-policy";
-import type { ThreadEnvironmentTarget } from "./environment";
+import type { FileRoot } from "./environment";
 
 export const DIRECTORY_COPY_LIMIT = 500;
 
@@ -16,7 +16,7 @@ function errorMessage(error: unknown): string {
 
 export async function duplicateFile(args: {
   files: FilesSdk;
-  target: ThreadEnvironmentTarget;
+  target: FileRoot;
   sourcePath: string;
   destinationPath: string;
 }): Promise<DuplicateResult> {
@@ -49,7 +49,7 @@ export async function duplicateFile(args: {
 
 export async function duplicateDirectory(args: {
   files: FilesSdk;
-  target: ThreadEnvironmentTarget;
+  target: FileRoot;
   sourcePath: string;
   destinationPath: string;
 }): Promise<DuplicateResult> {

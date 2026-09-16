@@ -9,13 +9,26 @@ interface ThreadPanelRegistration {
   run?: unknown;
 }
 
-const captured = { threadPanelActions: [] as ThreadPanelRegistration[], fileOpeners: [] as FileOpenerRegistration[] };
+interface NavPanelRegistration {
+  id: string;
+  title: string;
+  icon: string;
+  path: string;
+  component: ComponentType<{ subPath: string }>;
+}
+
+const captured = {
+  threadPanelActions: [] as ThreadPanelRegistration[],
+  fileOpeners: [] as FileOpenerRegistration[],
+  navPanels: [] as NavPanelRegistration[],
+};
 let rpcHandlers: Record<string, (input: unknown) => unknown> = {};
 let bbContext = { projectId: null as string | null, threadId: null as string | null };
 
 export function resetPluginRuntime() {
   captured.threadPanelActions.length = 0;
   captured.fileOpeners.length = 0;
+  captured.navPanels.length = 0;
   rpcHandlers = {};
   bbContext = { projectId: null, threadId: null };
 }
@@ -42,6 +55,7 @@ export function definePluginApp(
     slots: {
       threadPanelAction(registration: ThreadPanelRegistration): void;
       fileOpener(registration: FileOpenerRegistration): void;
+      navPanel(registration: NavPanelRegistration): void;
     };
   }) => void,
 ) {
@@ -52,6 +66,9 @@ export function definePluginApp(
       },
       fileOpener(registration) {
         captured.fileOpeners.push(registration);
+      },
+      navPanel(registration) {
+        captured.navPanels.push(registration);
       },
     },
   });

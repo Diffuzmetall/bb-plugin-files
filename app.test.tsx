@@ -83,6 +83,41 @@ describe("Files plugin app", () => {
     expect(getCapturedPluginApp().threadPanelActions[0]).not.toHaveProperty("run");
   });
 
+  it("registers one left-sidebar panel that owns the global root route", () => {
+    expect(getCapturedPluginApp().navPanels).toEqual([
+      expect.objectContaining({
+        id: "files",
+        title: "Files",
+        icon: "FolderOpen",
+        path: "files",
+      }),
+    ]);
+  });
+
+  it("reads the host root from the sidebar panel, which has no thread", async () => {
+    setBbContext({ projectId: null, threadId: null });
+    const listDirectory = vi.fn(() => ({
+      path: "",
+      rootName: "Home",
+      entries: [],
+      annotateAvailable: false,
+      sqlAvailable: false,
+    }));
+    setRpcHandlers({ listDirectory });
+    const view = render(<FilesPanel subPath="" />);
+
+    await view.findByText("This folder is empty.");
+    // A thread-less route used to be refused outright; the sidebar panel must
+    // read the host root instead, and name it after the scope rather than after
+    // a directory segment.
+    expect(view.queryByRole("alert")).toBeNull();
+    expect(await view.findByText("Home")).toBeTruthy();
+    expect(listDirectory).toHaveBeenCalledWith({
+      scope: { kind: "host" },
+      path: "",
+    });
+  });
+
   it("registers itself as BB's file opener for the editable extensions", () => {
     const openers = getCapturedPluginApp().fileOpeners;
     expect(openers).toHaveLength(1);
@@ -122,7 +157,7 @@ describe("Files plugin app", () => {
       }),
     });
     const view = render(<FilesPanel threadId="thread-1" params={null} />);
-    await view.findByText("This workspace is empty.");
+    await view.findByText("This folder is empty.");
 
     fireEvent.click(view.getByRole("button", { name: "Upload files" }));
     const file = new File(["png"], "photo.png", { type: "image/png" });
@@ -130,10 +165,10 @@ describe("Files plugin app", () => {
       target: { files: [file] },
     });
 
-    expect(await view.findByText("Uploaded 1 file to workspace root.")).toBeTruthy();
+    expect(await view.findByText("Uploaded 1 file to the root.")).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(String(fetchMock.mock.calls[1]?.[0])).toContain(
-      "/api/v1/plugins/files/http/upload?threadId=thread-1&directory=&fileName=photo.png",
+      "/api/v1/plugins/files/http/upload?scope=thread&threadId=thread-1&directory=&fileName=photo.png",
     );
     expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
       method: "POST",
@@ -286,7 +321,7 @@ describe("Files plugin app", () => {
     );
 
     expect(openFile).toHaveBeenCalledWith({
-      threadId: "thread-1",
+      scope: { kind: "thread", threadId: "thread-1" },
       path: "README.md",
     });
   });
