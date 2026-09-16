@@ -462,6 +462,142 @@ describe("Files plugin app", () => {
     expect(readFile).not.toHaveBeenCalled();
   });
 
+  it("re-roots a host file link at the directory that owns it", async () => {
+    const resolveOpenerFile = vi.fn(() => ({
+      kind: "file",
+      scope: { kind: "host", hostId: "host-7", rootPath: "/home/ada" },
+      path: ".zshrc",
+    }));
+    const listDirectory = vi.fn(() => ({
+      path: "",
+      rootName: "ada",
+      entries: [
+        { kind: "file", path: ".zshrc", name: ".zshrc", score: 0, positions: [] },
+      ],
+      annotateAvailable: false,
+      sqlAvailable: false,
+    }));
+    const readFile = vi.fn(() => ({
+      state: "text",
+      path: ".zshrc",
+      sha256: "sha-1",
+      sizeBytes: 15,
+      mimeType: null,
+      modifiedAtMs: 1,
+      content: "export EDITOR=vi",
+    }));
+    setRpcHandlers({ resolveOpenerFile, listDirectory, readFile });
+    setBbContext({ projectId: "project-a", threadId: "thread-1" });
+
+    const view = render(
+      <FilesPanel
+        path="/home/ada/.zshrc"
+        source={{
+          kind: "host",
+          threadId: "thread-1",
+          environmentId: "env-1",
+          projectId: "project-a",
+          experimental_hostId: "host-7",
+        }}
+        Original={() => null}
+      />,
+    );
+    await view.findByRole("treeitem", { name: /\.zshrc/ });
+
+    // The link's own directory — not the whole machine, and not the thread
+    // workspace — is the root the panel reads the file through.
+    expect(resolveOpenerFile).toHaveBeenCalledWith({
+      source: {
+        kind: "host",
+        threadId: "thread-1",
+        experimental_hostId: "host-7",
+      },
+      path: "/home/ada/.zshrc",
+    });
+    expect(listDirectory).toHaveBeenCalledWith({
+      scope: { kind: "host", hostId: "host-7", rootPath: "/home/ada" },
+      path: "",
+    });
+    expect(readFile).toHaveBeenCalledWith({
+      scope: { kind: "host", hostId: "host-7", rootPath: "/home/ada" },
+      path: ".zshrc",
+    });
+    expect(view.queryByRole("alert")).toBeNull();
+  });
+
+  it("refuses a link the server cannot place instead of reading an unrelated file", async () => {
+    const resolveOpenerFile = vi.fn(() => ({
+      kind: "unsupported",
+      reason: "thread-storage",
+    }));
+    const listDirectory = vi.fn();
+    const readFile = vi.fn();
+    setRpcHandlers({ resolveOpenerFile, listDirectory, readFile });
+    setBbContext({ projectId: "project-a", threadId: "thread-1" });
+
+    const view = render(
+      <FilesPanel
+        path="notes/todo.md"
+        source={{
+          kind: "thread-storage",
+          threadId: "thread-1",
+          environmentId: "env-1",
+          projectId: "project-a",
+        }}
+        Original={() => null}
+      />,
+    );
+    await view.findByRole("alert");
+
+    expect(listDirectory).not.toHaveBeenCalled();
+    expect(readFile).not.toHaveBeenCalled();
+  });
+
+  it("opens a workspace file link without asking the server where it lives", async () => {
+    const resolveOpenerFile = vi.fn();
+    const listDirectory = vi.fn(() => ({
+      path: "",
+      rootName: "repo",
+      entries: [],
+      annotateAvailable: false,
+      sqlAvailable: false,
+    }));
+    setRpcHandlers({
+      resolveOpenerFile,
+      listDirectory,
+      readFile: vi.fn(() => ({
+        state: "text",
+        path: "README.md",
+        sha256: "sha-1",
+        sizeBytes: 6,
+        mimeType: null,
+        modifiedAtMs: 1,
+        content: "# Docs",
+      })),
+    });
+    setBbContext({ projectId: "project-a", threadId: "thread-1" });
+
+    render(
+      <FilesPanel
+        path="README.md"
+        source={{
+          kind: "workspace",
+          threadId: "thread-1",
+          environmentId: "env-1",
+          projectId: "project-a",
+        }}
+        Original={() => null}
+      />,
+    );
+    await waitFor(() =>
+      expect(listDirectory).toHaveBeenCalledWith({
+        scope: { kind: "thread", threadId: "thread-1" },
+        path: "",
+      }),
+    );
+    expect(resolveOpenerFile).not.toHaveBeenCalled();
+  });
+
   it("fails closed for unauthorized callback invocations", async () => {
     const { useFilesWorkspace } = await import("./src/hooks/useFilesWorkspace");
     const { renderHook } = await import("@testing-library/react");

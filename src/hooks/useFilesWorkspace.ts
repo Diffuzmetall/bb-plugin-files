@@ -212,7 +212,21 @@ function saveStoredWorkspace(source: WorkspaceFileIdentity["source"], state: Sto
   }
 }
 
-export type FilesRootScope = "thread" | "host";
+/**
+ * The root a Files panel reads: the thread's workspace (`thread`), this
+ * machine's global root (`host`), or — when a file link points outside the
+ * workspace — one host directory that the file was opened from.
+ */
+export type FilesRootScope =
+  | "thread"
+  | "host"
+  | { kind: "host"; hostId?: string; rootPath: string };
+
+function scopeIdentity(rootScope: FilesRootScope): string {
+  return typeof rootScope === "string"
+    ? rootScope
+    : `${rootScope.hostId ?? ""}\u0000${rootScope.rootPath}`;
+}
 
 /** Shown while a scope has no live root to read. */
 export const FILE_SOURCE_UNAVAILABLE =
@@ -229,23 +243,39 @@ export function useFilesWorkspace(
 ) {
   const context = useBbContext();
   const rpc = useRpc<typeof filesRpcContract>();
+  // A re-rooted panel receives a fresh scope object on every render, so the
+  // identity string — not the object — keys the memos.
+  const rootIdentity = scopeIdentity(rootScope);
+  const reRootedHostId =
+    typeof rootScope === "string" ? undefined : rootScope.hostId;
+  const reRootedRootPath =
+    typeof rootScope === "string" ? undefined : rootScope.rootPath;
   // Root identity is resolved by the server for every RPC. Persisted state and
   // component props never contribute to the authorization decision.
-  const scope = useMemo<FileScope | null>(
-    () =>
-      rootScope === "host"
-        ? { kind: "host" }
-        : context.threadId === null
-          ? null
-          : { kind: "thread", threadId: context.threadId },
-    [context.threadId, rootScope],
-  );
+  const scope = useMemo<FileScope | null>(() => {
+    if (rootIdentity === "thread") {
+      return context.threadId === null
+        ? null
+        : { kind: "thread", threadId: context.threadId };
+    }
+    if (reRootedRootPath === undefined) return { kind: "host" };
+    return reRootedHostId === undefined
+      ? { kind: "host", rootPath: reRootedRootPath }
+      : { kind: "host", hostId: reRootedHostId, rootPath: reRootedRootPath };
+  }, [context.threadId, reRootedHostId, reRootedRootPath, rootIdentity]);
   const workspaceSource = useMemo(
     () =>
-      rootScope === "host"
-        ? { kind: "host" as const, threadId: null, environmentId: null, projectId: null }
+      rootIdentity !== "thread"
+        ? {
+            kind: "host" as const,
+            threadId: null,
+            environmentId: null,
+            // The root path is this panel's identity component, so tabs stay
+            // per directory instead of merging every host root into one set.
+            projectId: reRootedRootPath ?? null,
+          }
         : { kind: "workspace" as const, threadId: context.threadId ?? "", environmentId: null, projectId: context.projectId },
-    [context.projectId, context.threadId, rootScope],
+    [context.projectId, context.threadId, reRootedRootPath, rootIdentity],
   );
   const canRead = scope !== null;
   const [query, setQuery] = useState("");
