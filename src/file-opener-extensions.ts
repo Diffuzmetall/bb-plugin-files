@@ -1,25 +1,38 @@
 /**
  * Extensions the Files panel offers to open for other surfaces.
  *
- * Text, code, Markdown, and Excalidraw are what this plugin edits better than
- * BB's preview. Binary and media formats stay with BB's own preview, which is
- * lighter and already correct for them. BB accepts lowercase extensions
- * without the dot, and keeps rendering the first applicable opener unless the
- * user pins this one under Settings → Files.
+ * The panel renders Markdown in its editor, HTML in a preview frame, SVG and
+ * raster images as pictures, and everything else as source — which is what it
+ * offers for these extensions. Formats it has no renderer for (PDF, archives,
+ * media) stay with BB's own preview. BB accepts lowercase extensions without
+ * the dot, and keeps rendering the first applicable opener unless the user
+ * pins this one under Settings → Files.
  */
 export const FILE_OPENER_EXTENSIONS = [
+  // Source and configuration
   "bash",
   "c",
+  "cc",
   "cjs",
+  "clj",
+  "cmake",
   "conf",
   "cpp",
   "cs",
   "css",
   "csv",
+  "dart",
+  "diff",
+  "editorconfig",
   "env",
-  "excalidraw",
+  "erl",
+  "ex",
+  "exs",
+  "gitignore",
   "go",
+  "gradle",
   "h",
+  "hh",
   "hpp",
   "htm",
   "html",
@@ -31,26 +44,51 @@ export const FILE_OPENER_EXTENSIONS = [
   "jsx",
   "kt",
   "less",
+  "lock",
   "log",
+  "lua",
+  "make",
   "markdown",
   "md",
   "mdx",
   "mjs",
+  "mk",
+  "npmrc",
+  "nvmrc",
+  "patch",
   "php",
+  "pl",
   "properties",
   "py",
+  "r",
   "rb",
   "rs",
+  "scala",
   "scss",
   "sh",
   "sql",
+  "svelte",
   "svg",
+  "swift",
+  "text",
   "toml",
   "ts",
+  "tsv",
   "tsx",
   "txt",
+  "vue",
   "xml",
   "yaml",
   "yml",
   "zsh",
+  // Pictures the panel can show as pictures
+  "avif",
+  "bmp",
+  "excalidraw",
+  "gif",
+  "ico",
+  "jpeg",
+  "jpg",
+  "png",
+  "webp",
 ] as const;
