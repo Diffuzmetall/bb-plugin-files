@@ -9,12 +9,8 @@ A standalone BB plugin that adds **Actions → Files** to every thread. The pane
 BB Files requires BB `>=0.35.1`. Install the current tagged release:
 
 ```bash
-bb plugin install 'git:https://github.com/Diffuzmetall/bb-plugin-files.git@v0.1.3' --yes
+bb plugin install 'git:https://github.com/Diffuzmetall/bb-plugin-files.git@v0.1.4' --yes
 ```
-
-The file-opener registration (see
-[Opening files from other plugins](#opening-files-from-other-plugins)) lives on
-`main` until it is tagged — install `@main` to get it now.
 
 After the plugin is listed in the BB Community marketplace, BB can report and
 apply compatible tagged updates without installing them automatically:
@@ -51,7 +47,7 @@ current `^0.1.0` range are selected from those tags.
   ([yazydzhi/bb-plugin-sql](https://github.com/yazydzhi/bb-plugin-sql));
 - **Open with preferred…** on any file — reopens via BB’s host file flow so
   **Settings → File openers** apply (the in-panel editor itself does not);
-- optional **file opener** for links from other surfaces — see
+- **file opener** registration for links from other surfaces — see
   [Opening files from other plugins](#opening-files-from-other-plugins);
 - narrow panel navigation with a Back control;
 - symlinks and `node_modules` remain excluded by BB's host lister.
@@ -78,11 +74,13 @@ in the active workspace, so a workspace or host path opens directly; when BB has
 no thread for the tab, the panel reports that the source is unavailable. Git-ref
 snapshots (diff views) always use BB's preview.
 
-BB renders the first applicable opener for an extension unless one is pinned,
-so installing the plugin adds a choice rather than changing the default: pick
-**Files** for an extension under **Settings → Files** to make it win, or use a
-file tab's **Open with** menu to override it once. **Automatic** restores the
-built-in choice.
+BB renders the first applicable opener for an extension unless a preference
+says otherwise, so installing the plugin makes the Files panel the default
+viewer for these extensions instead of BB's built-in preview. **Settings →
+Files → File openers** pins a viewer per extension — `Automatic (…)`,
+`Built-in preview`, or any registered opener — and right-clicking a file link
+overrides the choice for that one open. Another plugin registering the same
+extension competes for that default until a preference settles it.
 
 ## Development
 
