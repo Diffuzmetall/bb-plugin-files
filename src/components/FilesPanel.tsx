@@ -1,6 +1,7 @@
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   useBbContext,
+  useRpc,
   type PluginFileOpenerProps,
   type PluginNavPanelProps,
   type PluginThreadPanelProps,
@@ -26,6 +27,8 @@ import {
   type FilesRootScope,
 } from "../hooks/useFilesWorkspace";
 import { useResponsiveLayout } from "../hooks/useResponsiveLayout";
+import type { filesRpcContract } from "../../server";
+import type { FileScope } from "../contracts";
 
 function parentPath(path: string): string {
   const slash = path.lastIndexOf("/");
@@ -64,13 +67,28 @@ function isNavPanelProps(props: FilesPanelProps): props is PluginNavPanelProps {
   return "subPath" in props;
 }
 
+type OpenedFileResolution =
+  | { state: "pending" }
+  | { state: "file"; rootScope: FilesRootScope; path: string }
+  | { state: "unsupported" };
+
+/** The server decides the root; the panel only renders it. */
+function panelRootScope(scope: FileScope): FilesRootScope {
+  if (scope.kind === "thread") return "thread";
+  if (scope.rootPath === undefined) return "host";
+  return scope.hostId === undefined
+    ? { kind: "host", rootPath: scope.rootPath }
+    : { kind: "host", hostId: scope.hostId, rootPath: scope.rootPath };
+}
+
 export function FilesPanel(props: FilesPanelProps) {
   const context = useBbContext();
-  const opener = isFileOpenerProps(props);
-  const rootScope: FilesRootScope = isNavPanelProps(props) ? "host" : "thread";
+  if (isNavPanelProps(props)) {
+    return <FilesPanelContent key="host-root" initialPath={null} rootScope="host" />;
+  }
   // The host context and server-side root resolution are the authorization
   // boundary. Opener and panel props are persisted input only.
-  if (rootScope === "thread" && context.threadId === null) {
+  if (context.threadId === null) {
     return (
       <div
         className="grid h-full place-items-center p-6 text-sm text-muted-foreground"
@@ -80,15 +98,104 @@ export function FilesPanel(props: FilesPanelProps) {
       </div>
     );
   }
-  const sourceKey =
-    rootScope === "host"
-      ? "host-root"
-      : JSON.stringify([context.threadId, context.projectId]);
+  if (isFileOpenerProps(props)) {
+    return <OpenedFile source={props.source} path={props.path} />;
+  }
   return (
     <FilesPanelContent
-      key={sourceKey}
-      initialPath={opener ? props.path : null}
-      rootScope={rootScope}
+      key={JSON.stringify([context.threadId, context.projectId])}
+      initialPath={null}
+      rootScope="thread"
+    />
+  );
+}
+
+/** A file link from another surface: workspace files open in the thread root,
+ * host files re-root the panel at the directory that owns them. */
+function OpenedFile({
+  source,
+  path,
+}: Pick<PluginFileOpenerProps, "source" | "path">) {
+  const rpc = useRpc<typeof filesRpcContract>();
+  // `useRpc` may hand back a fresh client on every render, so the request is
+  // keyed by the link itself and issued once per link.
+  const rpcRef = useRef(rpc);
+  rpcRef.current = rpc;
+  const requestedRef = useRef<string | null>(null);
+  // A workspace path is already relative to the thread root, so it opens
+  // without a round trip; every other source asks the server where it lives.
+  const workspaceFile = source.kind === "workspace" && !path.startsWith("/");
+  const [resolved, setResolved] = useState<OpenedFileResolution>(() =>
+    workspaceFile ? { state: "file", rootScope: "thread", path } : { state: "pending" },
+  );
+
+  useEffect(() => {
+    if (workspaceFile) return;
+    const requestKey = JSON.stringify([
+      source.kind,
+      source.threadId,
+      source.experimental_hostId ?? null,
+      path,
+    ]);
+    if (requestedRef.current === requestKey) return;
+    requestedRef.current = requestKey;
+    // The path itself is not trusted: the server decides which root may read
+    // it, and a link it cannot place shows the same notice as a missing source.
+    void rpcRef.current
+      .call("resolveOpenerFile", {
+        source: {
+          kind: source.kind,
+          threadId: source.threadId,
+          ...(source.experimental_hostId === undefined
+            ? {}
+            : { experimental_hostId: source.experimental_hostId }),
+        },
+        path,
+      })
+      .then((result) => {
+        setResolved(
+          result.kind === "file"
+            ? {
+                state: "file",
+                rootScope: panelRootScope(result.scope),
+                path: result.path,
+              }
+            : { state: "unsupported" },
+        );
+      })
+      .catch(() => setResolved({ state: "unsupported" }));
+  }, [path, source.experimental_hostId, source.kind, source.threadId, workspaceFile]);
+
+  if (resolved.state === "pending") {
+    return (
+      <div
+        className="grid h-full place-items-center p-6 text-sm text-muted-foreground"
+        role="status"
+      >
+        Opening file…
+      </div>
+    );
+  }
+  if (resolved.state === "unsupported") {
+    return (
+      <div
+        className="grid h-full place-items-center p-6 text-sm text-muted-foreground"
+        role="alert"
+      >
+        {FILE_SOURCE_UNAVAILABLE}
+      </div>
+    );
+  }
+  const target = resolved;
+  return (
+    <FilesPanelContent
+      key={
+        typeof target.rootScope === "string"
+          ? target.rootScope
+          : `${target.rootScope.hostId ?? ""}\u0000${target.rootScope.rootPath}\u0000${target.path}`
+      }
+      initialPath={target.path}
+      rootScope={target.rootScope}
     />
   );
 }

@@ -1,4 +1,5 @@
 import { homedir } from "node:os";
+import { posix } from "node:path";
 import type { BbPluginApi } from "@bb/plugin-sdk";
 
 export interface FileRoot {
@@ -75,4 +76,29 @@ export async function resolveFileRoot(
   // the local host's global root. The host daemon hides dot-entries in every
   // browsable directory, so the root listing probes those by name instead.
   return { rootPath: homedir() };
+}
+
+/**
+ * Where to browse a file that lives outside the thread workspace.
+ *
+ * BB hands a `host` file link over as an absolute path on the machine that owns
+ * it, so the panel re-roots itself at that file's own directory: the opened file
+ * stays addressable as the root-relative file name, and the directory — not the
+ * whole machine — remains the declared boundary. Returns null when the path
+ * names no readable file (`/`, or a path that is not absolute).
+ */
+export function hostTargetForAbsolutePath(
+  path: string,
+  hostId: string | undefined,
+): { scope: FileScope; path: string } | null {
+  const name = posix.basename(path);
+  if (!path.startsWith("/") || name.length === 0) return null;
+  const rootPath = posix.dirname(path);
+  return {
+    path: name,
+    scope:
+      hostId === undefined
+        ? { kind: "host", rootPath }
+        : { kind: "host", hostId, rootPath },
+  };
 }

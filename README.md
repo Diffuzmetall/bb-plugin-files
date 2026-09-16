@@ -9,7 +9,7 @@ A standalone BB plugin that adds a **Files** panel in two places: **Actions → 
 BB Files requires BB `>=0.35.1`. Install the current tagged release:
 
 ```bash
-bb plugin install 'git:https://github.com/Diffuzmetall/bb-plugin-files.git@v0.2.1' --yes
+bb plugin install 'git:https://github.com/Diffuzmetall/bb-plugin-files.git@v0.3.0' --yes
 ```
 
 After the plugin is listed in the BB Community marketplace, BB can report and
@@ -21,7 +21,7 @@ bb plugin update files
 ```
 
 Releases use immutable `vX.Y.Z` Git tags. Marketplace updates within the
-current `^0.2.0` range are selected from those tags.
+current `^0.3.0` range are selected from those tags.
 
 ## Project documentation
 
@@ -50,6 +50,9 @@ current `^0.2.0` range are selected from those tags.
   **Settings → File openers** apply (the in-panel editor itself does not);
 - **file opener** registration for links from other surfaces — see
   [Opening files from other plugins](#opening-files-from-other-plugins);
+- **Host file links**: a link to an absolute path outside the workspace opens in
+the panel too — the server resolves the machine that owns it and re-roots the
+panel at that file's own directory;
 - narrow panel navigation with a Back control;
 - `node_modules` stays hidden in both roots; a thread workspace excludes symlinks through BB's host lister, while the left-rail root shows symlinks that resolve and skips broken ones.
 
@@ -81,13 +84,21 @@ that the source is unavailable. Git-ref snapshots (diff views) always use BB's
 preview.
 
 A link pointing outside the thread's workspace — an absolute terminal path, for
-example — does not open: the panel asks you to pick a file from its tree
-instead. The left-rail panel can browse such a path, but the opener does not
-route to it automatically yet.
+example — opens as well: the server resolves it to the machine that owns the
+file and re-roots the panel at that file's own directory, so the opened file is
+an entry of that root instead of the workspace. Thread storage (`thread-storage`
+links) is the one source the panel still refuses, with the same notice it shows
+for an unavailable source.
 
-BB renders the first applicable opener for an extension unless a preference
-says otherwise, so installing the plugin makes the Files panel the default
-viewer for these extensions instead of BB's built-in preview. **Settings →
+Another plugin can claim the same extension. While a preference is `Automatic`,
+the first matching opener wins, and an opener that delegates to `Original`
+renders BB's built-in preview under its own tab. Excalidraw claims `md` for
+`.excalidraw.md` scenes, which is why markdown needs an explicit choice:
+**Settings → Files → File openers** → `.md files` → `Files (files)`.
+
+BB renders the first opener that claims an extension while the preference is
+`Automatic (…)`, so the Files panel becomes the viewer for these extensions only
+where no earlier registered opener claims them. **Settings →
 Files → File openers** pins a viewer per extension — `Automatic (…)`,
 `Built-in preview`, or any registered opener — and right-clicking a file link
 overrides the choice for that one open. Another plugin registering the same
@@ -169,27 +180,31 @@ bb plugin install git:https://github.com/yazydzhi/bb-plugin-sql.git@^0.1.0 --yes
 This is a comprehensive summary of the current implementation for future maintenance and feature development.
 
 ### What works
+
 - **Multi-Tab Engine**: Core `useFilesWorkspace` hook refactored to support array-based `tabs` state. Supports concurrent open files with independent draft buffers.
 - **Persistence**: Tab paths and active tab selection are persisted in `localStorage` per file source (thread workspace or host root). Tabs are automatically re-hydrated on panel remount.
 - **UI Layout**: IDE-like layout with a resizable/collapsible file tree on the right and an editor on the left.
 - **Previews**:
-    - WYSIWYG Markdown preview with direct rendered-text editing and a Raw source fallback.
-    - HTML preview with iframe refresh after save and an "Open preview" action.
-    - Image preview for common formats.
+  - WYSIWYG Markdown preview with direct rendered-text editing and a Raw source fallback.
+  - HTML preview with iframe refresh after save and an "Open preview" action.
+  - Image preview for common formats.
 - **Editor Features**: 700ms autosave, SHA-based optimistic concurrency control (CAS) with conflict/overwrite UI, explicit download/copy actions.
 - **Robustness**: 10,000-entry tree cap, hidden dotfile probing, recursive delete/duplication/rename safety, and tests covering state transitions and persistence.
 
 ### What is implemented (Key Architecture)
+
 - **State**: `TabState` tracks per-tab `draftText`, `savedText`, `file` metadata, and `saveState`.
 - **Scope**: every RPC carries a `FileScope` (`{kind:"thread"}` or `{kind:"host"}`) that the server resolves to one root; a host scope without `rootPath` is this machine's home directory.
+- **Opener targets**: `resolveOpenerFile` maps a file link to a scope — a workspace link stays in the thread, an absolute host link becomes a host root at the file's own directory, and thread storage is reported as unsupported.
 - **Flow**: Autosave and polling observe `tabs` array. File reads are throttled and deduplicated using `fileLoadRequestsRef`.
 - **Sync**: Conflict detection checks file SHA against remote every 10s.
 
 ### Limitations & Known Issues
+
 - **Scroll Position**: Tab switching does not currently persist/restore scroll position (Codemirror instance reset).
 - **Large Files**: Files > 2MiB or non-text binaries are metadata-only (no content access).
 - **Tab State**: Only the tab *path* is persisted; draft contents are lost if the browser tab is refreshed (only panel-remount persistence is implemented).
-- **Out-of-workspace opener paths**: a file link pointing outside the thread workspace does not open — see [Opening files from other plugins](#opening-files-from-other-plugins).
+- **Thread-storage links**: a file link into the thread's own storage is not opened yet.
 
 ### Next Steps / Future Work
 
@@ -197,7 +212,7 @@ See [`ROADMAP.md`](ROADMAP.md) for the complete idea backlog and proposed implem
 
 ## Safety model
 
-The frontend sends a **scope** — `{kind:"thread",threadId}` or `{kind:"host",hostId?,rootPath?}` — plus a root-relative path. Every RPC resolves the scope again on the server: a thread scope re-resolves the thread environment, and a host scope is confined to `rootPath` (omitting it means this machine's home directory). `listPaths` receives the resolved absolute root because that SDK method has no `rootPath` field. Existing-file writes use their last-read SHA. New files use create-only writes. Folder duplication preflights at 501 entries and refuses more than 500.
+The frontend sends a **scope** — `{kind:"thread",threadId}` or `{kind:"host",hostId?,rootPath?}` — plus a root-relative path. Every RPC resolves the scope again on the server: a thread scope re-resolves the thread environment, and a host scope is confined to `rootPath` (omitting it means this machine's home directory; a file link outside the workspace is confined to the directory that holds the file). `listPaths` receives the resolved absolute root because that SDK method has no `rootPath` field. Existing-file writes use their last-read SHA. New files use create-only writes. Folder duplication preflights at 501 entries and refuses more than 500.
 
 Binary and oversized files are metadata-only. There is no fallback to the primary machine when a thread environment is unavailable; a machine-wide root has to be opened as its own scope.
 

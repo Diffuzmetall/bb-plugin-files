@@ -1,5 +1,11 @@
 import type { BbPluginApi } from "@bb/plugin-sdk";
-import { resolveFileRoot, type FileRoot, type FileScope } from "./environment";
+import {
+  hostTargetForAbsolutePath,
+  resolveFileRoot,
+  resolveThreadEnvironment,
+  type FileRoot,
+  type FileScope,
+} from "./environment";
 import { duplicateDirectory, duplicateFile } from "./duplicate";
 import { listLocalDirectory } from "./host-directory";
 import {
@@ -248,6 +254,55 @@ export function createFileService(bb: BbPluginApi) {
           lineNumber: null,
         },
       });
+    },
+
+    // A file link from another surface names its own source, and only an
+    // absolute host path has to be re-rooted: the panel cannot read outside its
+    // root, so it moves to the file's directory instead of widening the root.
+    async resolveOpenerFile({
+      source,
+      path,
+    }: {
+      source: {
+        kind: "workspace" | "host" | "thread-storage";
+        threadId: string | null;
+        experimental_hostId?: string;
+      };
+      path: string;
+    }) {
+      if (source.kind === "thread-storage") {
+        return {
+          kind: "unsupported" as const,
+          reason: "thread-storage" as const,
+        };
+      }
+      if (source.kind === "workspace" && !path.startsWith("/")) {
+        if (source.threadId === null) {
+          return { kind: "unsupported" as const, reason: "no-thread" as const };
+        }
+        return {
+          kind: "file" as const,
+          scope: { kind: "thread" as const, threadId: source.threadId },
+          path,
+        };
+      }
+      if (!path.startsWith("/")) {
+        return {
+          kind: "unsupported" as const,
+          reason: "not-absolute" as const,
+        };
+      }
+      // A host link is only readable on the machine that owns it, so an
+      // explicit host wins and otherwise the thread's own machine does.
+      const hostId =
+        source.experimental_hostId ??
+        (source.threadId === null
+          ? undefined
+          : (await resolveThreadEnvironment(bb.sdk, source.threadId)).hostId);
+      const target = hostTargetForAbsolutePath(path, hostId);
+      return target === null
+        ? { kind: "unsupported" as const, reason: "no-file-name" as const }
+        : { kind: "file" as const, scope: target.scope, path: target.path };
     },
 
     async readFile({ scope, path }: { scope: FileScope; path: string }) {

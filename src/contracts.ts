@@ -21,6 +21,19 @@ export const fileScopeSchema = z.discriminatedUnion("kind", [
 const relativePathSchema = z.string();
 const targetPathSchema = z.string().min(1);
 
+/**
+ * A file link handed over by another surface, as BB passes it to an opener.
+ * `experimental_hostId` is BB's explicit host for a host link and is absent on
+ * older hosts; the server falls back to the thread's own environment.
+ */
+const openerSourceSchema = z
+  .object({
+    kind: z.enum(["workspace", "host", "thread-storage"]),
+    threadId: threadIdSchema.nullable(),
+    experimental_hostId: z.string().trim().min(1).optional(),
+  })
+  .strict();
+
 export const treeEntrySchema = z
   .object({
     kind: z.enum(["file", "directory"]),
@@ -130,6 +143,35 @@ export const filesRpcContract = defineRpcContract({
       .object({ scope: fileScopeSchema, path: targetPathSchema })
       .strict(),
     output: z.object({ delivered: z.number().int().nonnegative() }).strict(),
+  },
+  // A file link from another surface arrives as a path plus the source it
+  // belongs to. A workspace link stays in the thread scope; a host link is
+  // absolute on the thread's machine and becomes a host root at the file's own
+  // directory. Thread storage is not a root this panel can read.
+  resolveOpenerFile: {
+    input: z
+      .object({ source: openerSourceSchema, path: z.string().min(1) })
+      .strict(),
+    output: z.discriminatedUnion("kind", [
+      z
+        .object({
+          kind: z.literal("file"),
+          scope: fileScopeSchema,
+          path: z.string().min(1),
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("unsupported"),
+          reason: z.enum([
+            "thread-storage",
+            "not-absolute",
+            "no-file-name",
+            "no-thread",
+          ]),
+        })
+        .strict(),
+    ]),
   },
   saveFile: {
     input: z
