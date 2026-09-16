@@ -1,6 +1,7 @@
 import type { BbPluginApi } from "@bb/plugin-sdk";
-import { resolveThreadEnvironment, type ThreadEnvironmentTarget } from "./environment";
+import { resolveFileRoot, type FileRoot, type FileScope } from "./environment";
 import { duplicateDirectory, duplicateFile } from "./duplicate";
+import { listLocalDirectory } from "./host-directory";
 import {
   joinProjectPaths,
   parseRelativePath,
@@ -60,9 +61,19 @@ async function openerPluginFlags(bb: BbPluginApi): Promise<{
  * name and appends whatever exists (as a file, or walked one level deep as a
  * directory) directly onto `entries`.
  */
+/**
+ * The name the tree shows for a root. An implicit host scope is the local
+ * home directory, which reads better as "Home" than as its last segment.
+ */
+function rootLabel(scope: FileScope, rootPath: string): string {
+  return scope.kind === "host" && scope.rootPath === undefined
+    ? "Home"
+    : projectBasename(rootPath);
+}
+
 async function appendRootDotfileProbes(
   bb: BbPluginApi,
-  environment: ThreadEnvironmentTarget,
+  environment: FileRoot,
   entries: TreeEntryLike[],
 ): Promise<void> {
   await Promise.all(
@@ -137,13 +148,13 @@ function fileMetadata(
 }
 
 export function createFileService(bb: BbPluginApi) {
-  async function target(threadId: string) {
-    return resolveThreadEnvironment(bb.sdk, threadId);
+  async function target(scope: FileScope) {
+    return resolveFileRoot(bb.sdk, scope);
   }
 
   return {
-    async listTree({ threadId, query }: { threadId: string; query: string }) {
-      const environment = await target(threadId);
+    async listTree({ scope, query }: { scope: FileScope; query: string }) {
+      const environment = await target(scope);
       const result = await bb.sdk.files.listPaths({
         hostId: environment.hostId,
         path: environment.rootPath,
@@ -163,14 +174,15 @@ export function createFileService(bb: BbPluginApi) {
         };
       });
 
-      if (query.length === 0) {
+      // A host root reads its own dot-entries, so only a workspace probes them.
+      if (query.length === 0 && scope.kind === "thread") {
         await appendRootDotfileProbes(bb, environment, entries);
       }
 
       const openerFlags = await openerPluginFlags(bb);
 
       return {
-        rootName: projectBasename(environment.rootPath),
+        rootName: rootLabel(scope, environment.rootPath),
         entries,
         truncated: result.truncated,
         ...openerFlags,
@@ -180,16 +192,22 @@ export function createFileService(bb: BbPluginApi) {
     // Single-level directory read for the lazily-expanding tree. Costs one
     // shallow host.browse_directory call regardless of workspace size,
     // unlike listTree's recursive host.list_paths walk.
-    async listDirectory({ threadId, path }: { threadId: string; path: string }) {
-      const environment = await target(threadId);
+    async listDirectory({ scope, path }: { scope: FileScope; path: string }) {
+      const environment = await target(scope);
       const resolved = resolveProjectPath(environment.rootPath, path, {
         allowEmpty: true,
       });
-      const result = await bb.sdk.hosts.directory({
-        hostId: environment.hostId,
-        path: resolved.absolutePath,
-      });
-      const entries: TreeEntryLike[] = result.entries.map((entry) => ({
+      const hostId = environment.hostId;
+      const children =
+        hostId === undefined
+          ? await listLocalDirectory(resolved.absolutePath)
+          : (
+              await bb.sdk.hosts.directory({
+                hostId,
+                path: resolved.absolutePath,
+              })
+            ).entries;
+      const entries: TreeEntryLike[] = children.map((entry) => ({
         kind: entry.kind,
         path: joinProjectPaths(resolved.relativePath, entry.name),
         name: entry.name,
@@ -201,22 +219,29 @@ export function createFileService(bb: BbPluginApi) {
         return { path: resolved.relativePath, entries };
       }
 
-      await appendRootDotfileProbes(bb, environment, entries);
+      if (scope.kind === "thread") {
+        await appendRootDotfileProbes(bb, environment, entries);
+      }
 
       const openerFlags = await openerPluginFlags(bb);
 
       return {
         path: "",
         entries,
-        rootName: projectBasename(environment.rootPath),
+        rootName: rootLabel(scope, environment.rootPath),
         ...openerFlags,
       };
     },
 
-    async openFile({ threadId, path }: { threadId: string; path: string }) {
+    async openFile({ scope, path }: { scope: FileScope; path: string }) {
+      if (scope.kind !== "thread") {
+        throw new Error(
+          "Opening a file in BB's own preview needs an active thread.",
+        );
+      }
       const parsed = parseRelativePath(path, { allowEmpty: false });
       return bb.sdk.threads.open({
-        threadId,
+        threadId: scope.threadId,
         file: {
           source: "workspace",
           path: parsed.normalized,
@@ -225,8 +250,8 @@ export function createFileService(bb: BbPluginApi) {
       });
     },
 
-    async readFile({ threadId, path }: { threadId: string; path: string }) {
-      const environment = await target(threadId);
+    async readFile({ scope, path }: { scope: FileScope; path: string }) {
+      const environment = await target(scope);
       const resolved = resolveProjectPath(environment.rootPath, path, {
         allowEmpty: false,
       });
@@ -250,12 +275,12 @@ export function createFileService(bb: BbPluginApi) {
     },
 
     async saveFile(input: {
-      threadId: string;
+      scope: FileScope;
       path: string;
       content: string;
       expectedSha256: string;
     }) {
-      const environment = await target(input.threadId);
+      const environment = await target(input.scope);
       const resolved = resolveProjectPath(environment.rootPath, input.path, {
         allowEmpty: false,
       });
@@ -270,11 +295,11 @@ export function createFileService(bb: BbPluginApi) {
     },
 
     async overwriteFile(input: {
-      threadId: string;
+      scope: FileScope;
       path: string;
       content: string;
     }) {
-      const environment = await target(input.threadId);
+      const environment = await target(input.scope);
       const resolved = resolveProjectPath(environment.rootPath, input.path, {
         allowEmpty: false,
       });
@@ -287,8 +312,8 @@ export function createFileService(bb: BbPluginApi) {
       });
     },
 
-    async createFile({ threadId, path }: { threadId: string; path: string }) {
-      const environment = await target(threadId);
+    async createFile({ scope, path }: { scope: FileScope; path: string }) {
+      const environment = await target(scope);
       const resolved = resolveProjectPath(environment.rootPath, path, {
         allowEmpty: false,
       });
@@ -303,13 +328,13 @@ export function createFileService(bb: BbPluginApi) {
     },
 
     async createDirectory({
-      threadId,
+      scope,
       path,
     }: {
-      threadId: string;
+      scope: FileScope;
       path: string;
     }) {
-      const environment = await target(threadId);
+      const environment = await target(scope);
       const resolved = resolveProjectPath(environment.rootPath, path, {
         allowEmpty: false,
       });
@@ -322,11 +347,11 @@ export function createFileService(bb: BbPluginApi) {
     },
 
     async movePath(input: {
-      threadId: string;
+      scope: FileScope;
       sourcePath: string;
       destinationPath: string;
     }) {
-      const environment = await target(input.threadId);
+      const environment = await target(input.scope);
       const source = resolveProjectPath(
         environment.rootPath,
         input.sourcePath,
@@ -346,11 +371,11 @@ export function createFileService(bb: BbPluginApi) {
     },
 
     async removePath(input: {
-      threadId: string;
+      scope: FileScope;
       path: string;
       recursive: boolean;
     }) {
-      const environment = await target(input.threadId);
+      const environment = await target(input.scope);
       const resolved = resolveProjectPath(environment.rootPath, input.path, {
         allowEmpty: false,
       });
@@ -363,12 +388,12 @@ export function createFileService(bb: BbPluginApi) {
     },
 
     async duplicatePath(input: {
-      threadId: string;
+      scope: FileScope;
       kind: "file" | "directory";
       sourcePath: string;
       destinationPath: string;
     }) {
-      const environment = await target(input.threadId);
+      const environment = await target(input.scope);
       const args = {
         files: bb.sdk.files,
         target: environment,
@@ -380,8 +405,8 @@ export function createFileService(bb: BbPluginApi) {
         : duplicateDirectory(args);
     },
 
-    async getDownloadUrl({ threadId, path }: { threadId: string; path: string }) {
-      const environment = await target(threadId);
+    async getDownloadUrl({ scope, path }: { scope: FileScope; path: string }) {
+      const environment = await target(scope);
       const resolved = resolveProjectPath(environment.rootPath, path, {
         allowEmpty: false,
       });

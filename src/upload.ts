@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import type { BbPluginApi } from "@bb/plugin-sdk";
-import { resolveThreadEnvironment } from "./environment";
+import { resolveFileRoot, type FileScope } from "./environment";
 import { joinProjectPaths, parseRelativePath, resolveProjectPath } from "./path-policy";
 
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
@@ -23,6 +23,29 @@ function requiredQuery(context: PluginHttpContext, name: string): string {
   const value = context.req.query(name);
   if (!value) throw new UploadError(400, `${name} is required`);
   return value;
+}
+
+/**
+ * The upload route carries its root the same way the RPC does: `scope=thread`
+ * with a `threadId`, or `scope=host` with an optional `rootPath`/`hostId`
+ * (`rootPath` omitted means this machine's home directory).
+ */
+function scopeFromQuery(context: PluginHttpContext): FileScope {
+  const mode = requiredQuery(context, "scope");
+  if (mode === "thread") {
+    return { kind: "thread", threadId: requiredQuery(context, "threadId") };
+  }
+  if (mode !== "host") {
+    throw new UploadError(400, "scope must be thread or host");
+  }
+  const rootPath = context.req.query("rootPath");
+  const hostId = context.req.query("hostId");
+  if (hostId && !rootPath) {
+    throw new UploadError(400, "rootPath is required with hostId");
+  }
+  if (rootPath && hostId) return { kind: "host", hostId, rootPath };
+  if (rootPath) return { kind: "host", rootPath };
+  return { kind: "host" };
 }
 
 function uploadPath(directory: string, fileName: string): string {
@@ -85,10 +108,10 @@ export async function readUploadBody(request: Request): Promise<Uint8Array> {
 export function createUploadHandler(bb: BbPluginApi) {
   return async (context: PluginHttpContext): Promise<Response> => {
     try {
-      const threadId = requiredQuery(context, "threadId");
+      const scope = scopeFromQuery(context);
       const fileName = requiredQuery(context, "fileName");
       const directory = context.req.query("directory") ?? "";
-      const environment = await resolveThreadEnvironment(bb.sdk, threadId);
+      const environment = await resolveFileRoot(bb.sdk, scope);
       const resolved = resolveProjectPath(
         environment.rootPath,
         uploadPath(directory, fileName),

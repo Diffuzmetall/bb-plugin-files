@@ -2,6 +2,22 @@ import { defineRpcContract } from "@bb/plugin-sdk";
 import { z } from "zod";
 
 const threadIdSchema = z.string().trim().min(1);
+
+/**
+ * The root a request runs against. `thread` is the thread's live workspace;
+ * `host` is an absolute root on a machine — with no `rootPath` it is this
+ * machine's home directory, which is what the left-sidebar Files panel opens.
+ */
+export const fileScopeSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("thread"), threadId: threadIdSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("host"),
+      hostId: z.string().trim().min(1).optional(),
+      rootPath: z.string().min(1).optional(),
+    })
+    .strict(),
+]);
 const relativePathSchema = z.string();
 const targetPathSchema = z.string().min(1);
 
@@ -75,9 +91,7 @@ const duplicateResultSchema = z.discriminatedUnion("outcome", [
 
 export const filesRpcContract = defineRpcContract({
   listTree: {
-    input: z
-      .object({ threadId: threadIdSchema, query: z.string() })
-      .strict(),
+    input: z.object({ scope: fileScopeSchema, query: z.string() }).strict(),
     output: z
       .object({
         rootName: z.string().min(1),
@@ -93,9 +107,7 @@ export const filesRpcContract = defineRpcContract({
   // directory so expanding a folder costs one shallow call instead of
   // re-scanning the whole workspace.
   listDirectory: {
-    input: z
-      .object({ threadId: threadIdSchema, path: z.string() })
-      .strict(),
+    input: z.object({ scope: fileScopeSchema, path: z.string() }).strict(),
     output: z
       .object({
         path: z.string(),
@@ -109,20 +121,20 @@ export const filesRpcContract = defineRpcContract({
   },
   readFile: {
     input: z
-      .object({ threadId: threadIdSchema, path: targetPathSchema })
+      .object({ scope: fileScopeSchema, path: targetPathSchema })
       .strict(),
     output: readFileResultSchema,
   },
   openFile: {
     input: z
-      .object({ threadId: threadIdSchema, path: targetPathSchema })
+      .object({ scope: fileScopeSchema, path: targetPathSchema })
       .strict(),
     output: z.object({ delivered: z.number().int().nonnegative() }).strict(),
   },
   saveFile: {
     input: z
       .object({
-        threadId: threadIdSchema,
+        scope: fileScopeSchema,
         path: targetPathSchema,
         content: z.string(),
         expectedSha256: z.string().min(1),
@@ -133,7 +145,7 @@ export const filesRpcContract = defineRpcContract({
   overwriteFile: {
     input: z
       .object({
-        threadId: threadIdSchema,
+        scope: fileScopeSchema,
         path: targetPathSchema,
         content: z.string(),
       })
@@ -142,20 +154,20 @@ export const filesRpcContract = defineRpcContract({
   },
   createFile: {
     input: z
-      .object({ threadId: threadIdSchema, path: targetPathSchema })
+      .object({ scope: fileScopeSchema, path: targetPathSchema })
       .strict(),
     output: writeResultSchema,
   },
   createDirectory: {
     input: z
-      .object({ threadId: threadIdSchema, path: targetPathSchema })
+      .object({ scope: fileScopeSchema, path: targetPathSchema })
       .strict(),
     output: mutationOkSchema,
   },
   movePath: {
     input: z
       .object({
-        threadId: threadIdSchema,
+        scope: fileScopeSchema,
         sourcePath: targetPathSchema,
         destinationPath: targetPathSchema,
       })
@@ -165,7 +177,7 @@ export const filesRpcContract = defineRpcContract({
   removePath: {
     input: z
       .object({
-        threadId: threadIdSchema,
+        scope: fileScopeSchema,
         path: targetPathSchema,
         recursive: z.boolean(),
       })
@@ -175,7 +187,7 @@ export const filesRpcContract = defineRpcContract({
   duplicatePath: {
     input: z
       .object({
-        threadId: threadIdSchema,
+        scope: fileScopeSchema,
         kind: z.enum(["file", "directory"]),
         sourcePath: targetPathSchema,
         destinationPath: targetPathSchema,
@@ -185,12 +197,13 @@ export const filesRpcContract = defineRpcContract({
   },
   getDownloadUrl: {
     input: z
-      .object({ threadId: threadIdSchema, path: targetPathSchema })
+      .object({ scope: fileScopeSchema, path: targetPathSchema })
       .strict(),
     output: z.object({ url: z.string().min(1) }).strict(),
   },
 });
 
+export type FileScope = z.infer<typeof fileScopeSchema>;
 export type TreeEntry = z.infer<typeof treeEntrySchema>;
 export type ReadFileResult = z.infer<typeof readFileResultSchema>;
 

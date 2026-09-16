@@ -75,6 +75,7 @@ function TreeRow({
   onToggle,
   onUpload,
   showAnnotate,
+  showOpenPreferred,
   showSql,
 }: {
   entry: FileTreeEntry;
@@ -85,6 +86,7 @@ function TreeRow({
   onToggle(path: string): void;
   onUpload(directory: string, files: File[]): void;
   showAnnotate: boolean;
+  showOpenPreferred: boolean;
   showSql: boolean;
 }) {
   const longPress = useLongPressContextMenu();
@@ -96,6 +98,7 @@ function TreeRow({
       entry={entry}
       onAction={onAction}
       showAnnotate={showAnnotate}
+      showOpenPreferred={showOpenPreferred}
       showSql={showSql}
     >
       <div
@@ -207,6 +210,7 @@ export function TreePane({
   selectedPath,
   setQuery,
   showAnnotate,
+  showOpenPreferred,
   showSql,
   truncated,
   uploadStatus,
@@ -227,6 +231,7 @@ export function TreePane({
   selectedPath: string | null;
   setQuery(value: string): void;
   showAnnotate: boolean;
+  showOpenPreferred: boolean;
   showSql: boolean;
   truncated: boolean;
   uploadStatus: { kind: "uploading" | "success" | "error"; message: string } | null;
@@ -289,7 +294,7 @@ export function TreePane({
           aria-hidden
         />
         <Input
-          aria-label="Search project files"
+          aria-label="Search files"
           className="h-7 rounded-none border-0 bg-transparent py-0 pl-7 pr-2 text-xs shadow-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
           placeholder="Search files"
           value={query}
@@ -332,7 +337,7 @@ export function TreePane({
           </p>
         ) : visibleEntries.length === 0 ? (
           <p className="p-3 text-sm text-muted-foreground">
-            {query ? "No matching files." : "This workspace is empty."}
+            {query ? "No matching files." : "This folder is empty."}
           </p>
         ) : (
           visibleEntries.map((entry) => (
@@ -345,6 +350,7 @@ export function TreePane({
               onOpen={onOpen}
               onUpload={onUpload}
               showAnnotate={showAnnotate}
+              showOpenPreferred={showOpenPreferred}
               showSql={showSql}
               onToggle={onToggleDirectory}
             />

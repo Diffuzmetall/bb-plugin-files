@@ -68,6 +68,7 @@ export function EditorPane({
   onDownload,
   onOpenInAnnotate,
   showAnnotate,
+  showOpenPreferred,
   onOpenInSql,
   showSql,
   onOpenPreferred,
@@ -87,6 +88,7 @@ export function EditorPane({
   onDownload(path: string): void;
   onOpenInAnnotate(path: string): void;
   showAnnotate: boolean;
+  showOpenPreferred: boolean;
   onOpenInSql(path: string): void;
   showSql: boolean;
   onOpenPreferred(path: string): void;
@@ -218,15 +220,17 @@ export function EditorPane({
           ) : null}
           {file !== null ? (
             <>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-6 w-6 text-muted-foreground hover:text-foreground"
-                aria-label="Open with preferred opener"
-                onClick={() => onOpenPreferred(activePath!)}
-              >
-                <Icon name="ExternalLink" className="h-3.5 w-3.5" />
-              </Button>
+              {showOpenPreferred ? (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                  aria-label="Open with preferred opener"
+                  onClick={() => onOpenPreferred(activePath!)}
+                >
+                  <Icon name="ExternalLink" className="h-3.5 w-3.5" />
+                </Button>
+              ) : null}
               {showSql && isSqlPath(activePath ?? "") ? (
                 <Button
                   size="icon"
