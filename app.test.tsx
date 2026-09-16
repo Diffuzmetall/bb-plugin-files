@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { FilesPanel } from "./app";
+import { FilesPanel, FILE_OPENER_EXTENSIONS } from "./app";
 
 vi.mock("@excalidraw/excalidraw", () => ({
   Excalidraw: (props: {
@@ -81,6 +81,21 @@ describe("Files plugin app", () => {
       }),
     ]);
     expect(getCapturedPluginApp().threadPanelActions[0]).not.toHaveProperty("run");
+  });
+
+  it("registers itself as BB's file opener for the editable extensions", () => {
+    const openers = getCapturedPluginApp().fileOpeners;
+    expect(openers).toHaveLength(1);
+    expect(openers[0]).toEqual(
+      expect.objectContaining({ id: "files", title: "Files" }),
+    );
+    expect(openers[0].extensions).toEqual(FILE_OPENER_EXTENSIONS);
+    expect(FILE_OPENER_EXTENSIONS.length).toBeGreaterThan(0);
+    for (const extension of FILE_OPENER_EXTENSIONS) {
+      expect(extension).toBe(extension.toLowerCase());
+      expect(extension).not.toContain(".");
+    }
+    expect(FILE_OPENER_EXTENSIONS).toContain("md");
   });
 
   it("uploads files selected from the local file picker", async () => {

@@ -9,12 +9,13 @@ interface ThreadPanelRegistration {
   run?: unknown;
 }
 
-const captured = { threadPanelActions: [] as ThreadPanelRegistration[] };
+const captured = { threadPanelActions: [] as ThreadPanelRegistration[], fileOpeners: [] as FileOpenerRegistration[] };
 let rpcHandlers: Record<string, (input: unknown) => unknown> = {};
 let bbContext = { projectId: null as string | null, threadId: null as string | null };
 
 export function resetPluginRuntime() {
   captured.threadPanelActions.length = 0;
+  captured.fileOpeners.length = 0;
   rpcHandlers = {};
   bbContext = { projectId: null, threadId: null };
 }
@@ -29,15 +30,28 @@ export function setRpcHandlers(
   rpcHandlers = handlers;
 }
 
+interface FileOpenerRegistration {
+  id: string;
+  title: string;
+  extensions: readonly string[];
+  component: ComponentType<unknown>;
+}
+
 export function definePluginApp(
   setup: (app: {
-    slots: { threadPanelAction(registration: ThreadPanelRegistration): void };
+    slots: {
+      threadPanelAction(registration: ThreadPanelRegistration): void;
+      fileOpener(registration: FileOpenerRegistration): void;
+    };
   }) => void,
 ) {
   setup({
     slots: {
       threadPanelAction(registration) {
         captured.threadPanelActions.push(registration);
+      },
+      fileOpener(registration) {
+        captured.fileOpeners.push(registration);
       },
     },
   });
