@@ -12,6 +12,10 @@ BB Files requires BB `>=0.35.1`. Install the current tagged release:
 bb plugin install 'git:https://github.com/Diffuzmetall/bb-plugin-files.git@v0.1.3' --yes
 ```
 
+The file-opener registration (see
+[Opening files from other plugins](#opening-files-from-other-plugins)) lives on
+`main` until it is tagged — install `@main` to get it now.
+
 After the plugin is listed in the BB Community marketplace, BB can report and
 apply compatible tagged updates without installing them automatically:
 
