@@ -357,6 +357,7 @@ function FilesPanelContent({
       onToggleDirectory={workspace.toggleDirectory}
       query={workspace.query}
       rootName={workspace.rootName}
+      searchStatus={workspace.searchStatus}
       selectedPath={workspace.activePath}
       setQuery={workspace.setQuery}
       showAnnotate={workspace.annotateAvailable}

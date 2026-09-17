@@ -42,6 +42,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "codemirror": "6.0.2",
+    "fzf": "^0.5.2",
     "tailwind-merge": "^3.6.0",
     "tiptap-markdown": "^0.8.10",
     "yaml": "^2.9.0",

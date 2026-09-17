@@ -13,6 +13,25 @@ export interface FileTreeEntry {
   positions: number[];
 }
 
+/**
+ * Where the server's search index stands. `indexing` means its walk is still
+ * running: the panel shows progress and keeps asking until it is `ready`.
+ */
+export interface SearchIndexState {
+  status: "ready" | "indexing";
+  indexedCount: number;
+  indexingSinceMs: number | null;
+}
+
+const IDLE_SEARCH_INDEX: SearchIndexState = {
+  status: "ready",
+  indexedCount: 0,
+  indexingSinceMs: null,
+};
+
+/** How often a search re-asks while the server is still building its index. */
+const INDEX_POLL_MS = 1_500;
+
 export type OpenFile =
   | {
       state: "text";
@@ -288,6 +307,7 @@ export function useFilesWorkspace(
   const [childrenByDir, setChildrenByDir] = useState<Map<string, FileTreeEntry[]>>(new Map());
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [searchEntries, setSearchEntries] = useState<FileTreeEntry[]>([]);
+  const [searchStatus, setSearchStatus] = useState<SearchIndexState>(IDLE_SEARCH_INDEX);
   const [treeLoading, setTreeLoading] = useState(true);
   const [treeError, setTreeError] = useState<string | null>(null);
   const [truncated, setTruncated] = useState(false);
@@ -466,25 +486,51 @@ export function useFilesWorkspace(
   );
 
   const refreshTree = useCallback(
-    async (nextQuery = query, silent = false) => {
+    async (
+      nextQuery = query,
+      options: { silent?: boolean; force?: boolean } = {},
+    ) => {
       if (!canRead) return false;
       const request = ++treeRequestRef.current;
-      if (!silent) setTreeLoading(true);
+      let force = options.force === true;
+      if (options.silent !== true) setTreeLoading(true);
       try {
         if (nextQuery.length > 0) {
-          const result = await rpc.call("listTree", { scope, query: nextQuery });
-          if (request !== treeRequestRef.current) return false;
-          setRootName(result.rootName);
-          setSearchEntries(result.entries);
-          setTruncated(result.truncated);
-          setAnnotateAvailable(result.annotateAvailable === true);
-          setSqlAvailable(result.sqlAvailable === true);
-          setTreeError(null);
-          return true;
+          // A search is answered from the server's path index. The first one on
+          // a root that was never indexed starts that walk, so keep asking
+          // until it is ready rather than showing an empty result and stopping.
+          for (;;) {
+            const result = await rpc.call("listTree", {
+              scope,
+              query: nextQuery,
+              ...(force ? { force: true } : {}),
+            });
+            force = false;
+            if (request !== treeRequestRef.current) return false;
+            setRootName(result.rootName);
+            setSearchEntries(result.entries);
+            setTruncated(result.truncated);
+            setSearchStatus({
+              status: result.status,
+              indexedCount: result.indexedCount,
+              indexingSinceMs: result.indexingSinceMs,
+            });
+            setAnnotateAvailable(result.annotateAvailable === true);
+            setSqlAvailable(result.sqlAvailable === true);
+            setTreeError(null);
+            if (result.status === "ready") return true;
+            await new Promise<void>((resolve) => {
+              window.setTimeout(resolve, INDEX_POLL_MS);
+            });
+            if (request !== treeRequestRef.current) return false;
+          }
         }
         const loadedDirs = ["", ...expandedDirsRef.current];
-        const results = await Promise.all(loadedDirs.map((dirPath) => loadDirectory(dirPath, silent)));
+        const results = await Promise.all(
+          loadedDirs.map((dirPath) => loadDirectory(dirPath, options.silent === true)),
+        );
         if (request !== treeRequestRef.current) return false;
+        setSearchStatus(IDLE_SEARCH_INDEX);
         setTruncated(false);
         return results.every(Boolean);
       } catch (error) {
@@ -492,11 +538,19 @@ export function useFilesWorkspace(
         setTreeError(message(error));
         return false;
       } finally {
-        if (request === treeRequestRef.current && !silent) setTreeLoading(false);
+        if (request === treeRequestRef.current && options.silent !== true) {
+          setTreeLoading(false);
+        }
       }
     },
     [canRead, loadDirectory, query, rpc, scope],
   );
+
+  // A search keeps polling while the server indexes, so it has to stop when
+  // the panel goes away instead of running until the walk ends.
+  useEffect(() => () => {
+    treeRequestRef.current += 1;
+  }, []);
 
   useEffect(() => {
     if (!canRead) {
@@ -729,7 +783,7 @@ export function useFilesWorkspace(
   useEffect(() => {
     if (!canRead) return;
     const timer = window.setInterval(() => {
-      void refreshTree(query, true);
+      void refreshTree(query, { silent: true });
       const currentTabs = tabsRef.current;
       currentTabs.forEach(tab => {
         const path = tab.path;
@@ -958,7 +1012,8 @@ export function useFilesWorkspace(
       openInPreferredViewer,
       overwrite,
       query,
-      refreshTree: () => refreshTree(query),
+      refreshTree: () => refreshTree(query, { force: true }),
+      searchStatus,
       reloadFile,
       removePath,
       rootName,
@@ -991,6 +1046,7 @@ export function useFilesWorkspace(
       overwrite,
       query,
       refreshTree,
+      searchStatus,
       reloadFile,
       removePath,
       rootName,
