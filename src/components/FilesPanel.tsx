@@ -84,7 +84,9 @@ function panelRootScope(scope: FileScope): FilesRootScope {
 export function FilesPanel(props: FilesPanelProps) {
   const context = useBbContext();
   if (isNavPanelProps(props)) {
-    return <FilesPanelContent key="host-root" initialPath={null} rootScope="host" />;
+    return (
+      <FilesPanelContent key="host-root" initialPath={null} rootScope="host" />
+    );
   }
   // The host context and server-side root resolution are the authorization
   // boundary. Opener and panel props are persisted input only.
@@ -126,7 +128,9 @@ function OpenedFile({
   // without a round trip; every other source asks the server where it lives.
   const workspaceFile = source.kind === "workspace" && !path.startsWith("/");
   const [resolved, setResolved] = useState<OpenedFileResolution>(() =>
-    workspaceFile ? { state: "file", rootScope: "thread", path } : { state: "pending" },
+    workspaceFile
+      ? { state: "file", rootScope: "thread", path }
+      : { state: "pending" },
   );
 
   useEffect(() => {
@@ -164,7 +168,13 @@ function OpenedFile({
         );
       })
       .catch(() => setResolved({ state: "unsupported" }));
-  }, [path, source.experimental_hostId, source.kind, source.threadId, workspaceFile]);
+  }, [
+    path,
+    source.experimental_hostId,
+    source.kind,
+    source.threadId,
+    workspaceFile,
+  ]);
 
   if (resolved.state === "pending") {
     return (

@@ -30,11 +30,25 @@ export const MAX_TEXT_BYTES = 2 * 1024 * 1024;
 const OPENER_FLAGS_TTL_MS = 10_000;
 
 const ROOT_DOTFILE_PROBES = [
-  ".gitignore", ".env", ".env.local", ".env.development", ".env.production",
-  ".pi", ".github", ".vscode", ".cursorrules", ".cursorignore",
-  ".npmrc", ".nvmrc", ".yarnrc",
-  ".dockerignore", ".editorconfig",
-  ".prettierrc", ".eslintrc", ".eslintrc.json", ".eslintrc.js"
+  ".gitignore",
+  ".env",
+  ".env.local",
+  ".env.development",
+  ".env.production",
+  ".pi",
+  ".github",
+  ".vscode",
+  ".cursorrules",
+  ".cursorignore",
+  ".npmrc",
+  ".nvmrc",
+  ".yarnrc",
+  ".dockerignore",
+  ".editorconfig",
+  ".prettierrc",
+  ".eslintrc",
+  ".eslintrc.json",
+  ".eslintrc.js",
 ];
 
 type FilesSdk = BbPluginApi["sdk"]["files"];
@@ -95,7 +109,9 @@ async function appendRootDotfileProbes(
 ): Promise<void> {
   const probe = async (name: string): Promise<void> => {
     try {
-      const resolved = resolveProjectPath(environment.rootPath, name, { allowEmpty: false });
+      const resolved = resolveProjectPath(environment.rootPath, name, {
+        allowEmpty: false,
+      });
       try {
         // Try reading as file
         await bb.sdk.files.read({
@@ -113,7 +129,11 @@ async function appendRootDotfileProbes(
       } catch (e: any) {
         // If it's a 404, it doesn't exist
         const errorStr = String(e?.message || e);
-        if (errorStr.includes("404") || errorStr.includes("not exist") || errorStr.includes("path_not_found")) {
+        if (
+          errorStr.includes("404") ||
+          errorStr.includes("not exist") ||
+          errorStr.includes("path_not_found")
+        ) {
           return; // Skip, it really doesn't exist
         }
 
@@ -242,8 +262,7 @@ export function createFileService(bb: BbPluginApi) {
         // Either the index stops at its own ceiling (there are more paths than
         // it holds) or the hit list is full, which also means "there is more".
         truncated:
-          outcome.truncated ||
-          outcome.entries.length >= MAX_SEARCH_RESULTS,
+          outcome.truncated || outcome.entries.length >= MAX_SEARCH_RESULTS,
         ...openerFlags,
         status: outcome.status,
         indexedCount: outcome.indexedCount,
@@ -374,7 +393,11 @@ export function createFileService(bb: BbPluginApi) {
       });
       const metadata = fileMetadata(resolved.relativePath, file);
       if (file.contentEncoding !== "utf8") {
-        return { state: "unsupported" as const, ...metadata, reason: "binary" as const };
+        return {
+          state: "unsupported" as const,
+          ...metadata,
+          reason: "binary" as const,
+        };
       }
       if (file.sizeBytes > MAX_TEXT_BYTES) {
         return {
@@ -441,13 +464,7 @@ export function createFileService(bb: BbPluginApi) {
       return result;
     },
 
-    async createDirectory({
-      scope,
-      path,
-    }: {
-      scope: FileScope;
-      path: string;
-    }) {
+    async createDirectory({ scope, path }: { scope: FileScope; path: string }) {
       const environment = await target(scope);
       const resolved = resolveProjectPath(environment.rootPath, path, {
         allowEmpty: false,
