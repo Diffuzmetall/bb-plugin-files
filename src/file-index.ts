@@ -64,8 +64,13 @@ export const INDEX_SKIP_NAMES: ReadonlySet<string> = new Set([
 export const MAX_INDEX_ENTRIES = 400_000;
 export const MAX_INDEX_MS = 45_000;
 
-/** How long a search waits for a fresh build before reporting progress. */
-const MAX_INDEX_WAIT_MS = 15_000;
+/**
+ * How long a search waits for a fresh build before answering with whatever the
+ * walk has found so far. Short on purpose: the panel polls while an index is
+ * being built, so a partial list plus a progress line beats a silent wait with
+ * nothing on screen.
+ */
+const MAX_INDEX_WAIT_MS = 1_500;
 
 /** Results kept per query, matching the file-manager plugin's ceiling. */
 export const MAX_SEARCH_RESULTS = 500;
@@ -162,7 +167,8 @@ export async function walkDirectoryIndex(options: {
         if (!options.includeHidden && dirent.name.startsWith(".")) continue;
         const absolutePath = path.join(dir, dirent.name);
         let kind: "file" | "directory" | null;
-        if (dirent.isSymbolicLink()) kind = await classifySymlink(absolutePath, statTarget);
+        if (dirent.isSymbolicLink())
+          kind = await classifySymlink(absolutePath, statTarget);
         else if (dirent.isDirectory()) kind = "directory";
         else if (dirent.isFile()) kind = "file";
         else kind = null; // Sockets, fifos, devices: not browsable.
@@ -184,7 +190,8 @@ export async function walkDirectoryIndex(options: {
           path: relativePath,
           lower: relativePath.toLowerCase(),
         });
-        if (kind === "directory" && !dirent.isSymbolicLink()) next.push(absolutePath);
+        if (kind === "directory" && !dirent.isSymbolicLink())
+          next.push(absolutePath);
       }
       options.onProgress?.(entries.length, entries);
       if (truncated) break;
@@ -197,13 +204,19 @@ export async function walkDirectoryIndex(options: {
 
 /** Index of the host daemon: same entries as its own `list_paths` walk. */
 export function indexFromPaths(
-  paths: ReadonlyArray<{ kind: "file" | "directory"; path: string; name: string }>,
+  paths: ReadonlyArray<{
+    kind: "file" | "directory";
+    path: string;
+    name: string;
+  }>,
 ): BuiltIndex {
   const entries: IndexEntry[] = [];
   for (const entry of paths) {
     let relativePath: string;
     try {
-      relativePath = parseRelativePath(entry.path, { allowEmpty: false }).normalized;
+      relativePath = parseRelativePath(entry.path, {
+        allowEmpty: false,
+      }).normalized;
     } catch {
       continue;
     }
@@ -218,7 +231,11 @@ export function indexFromPaths(
 
 function isSubsequence(haystack: string, needle: string): boolean {
   let index = 0;
-  for (let cursor = 0; cursor < haystack.length && index < needle.length; cursor += 1) {
+  for (
+    let cursor = 0;
+    cursor < haystack.length && index < needle.length;
+    cursor += 1
+  ) {
     if (haystack[cursor] === needle[index]) index += 1;
   }
   return index === needle.length;
@@ -348,7 +365,9 @@ export class FileIndexCache {
        * one call; a home directory cannot, so it reports progress instead.
        */
       waitMs?: number;
-      build: (onProgress: (scanned: number, entries: IndexEntry[]) => void) => Promise<BuiltIndex>;
+      build: (
+        onProgress: (scanned: number, entries: IndexEntry[]) => void,
+      ) => Promise<BuiltIndex>;
     },
   ): Promise<SearchOutcome> {
     const key = scopeKey(scope);
@@ -398,7 +417,9 @@ export class FileIndexCache {
   /** Start (or join) a background build. Never throws to its caller. */
   private startBuild(
     scope: FileScope,
-    build: (onProgress: (scanned: number, entries: IndexEntry[]) => void) => Promise<BuiltIndex>,
+    build: (
+      onProgress: (scanned: number, entries: IndexEntry[]) => void,
+    ) => Promise<BuiltIndex>,
   ): void {
     const key = scopeKey(scope);
     if (this.pending.has(key)) return;

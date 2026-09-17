@@ -10,10 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
-import {
-  FileContextMenu,
-  type FileAction,
-} from "./FileContextMenu";
+import { FileContextMenu, type FileAction } from "./FileContextMenu";
 import type { FileTreeEntry } from "../hooks/useFilesWorkspace";
 import { filterVisibleEntries, orderTreeEntries } from "../tree-order";
 
@@ -21,6 +18,19 @@ import { type IconName } from "@/components/ui/icon";
 
 function depth(path: string): number {
   return path.split("/").length - 1;
+}
+
+/**
+ * Search answers are one flat, ranked list from every folder below the root, so
+ * a bare file name says nothing about where a hit lives. Keep enough of the
+ * parent path to name both the root it belongs to and the folder above it,
+ * collapsing the middle of a deep path.
+ */
+function parentLabel(path: string, name: string): string {
+  if (path.length <= name.length) return "";
+  const segments = path.slice(0, path.length - name.length - 1).split("/");
+  if (segments.length <= 4) return segments.join("/");
+  return `${segments.slice(0, 2).join("/")}/…/${segments.slice(-2).join("/")}`;
 }
 
 /**
@@ -90,9 +100,13 @@ function hasDraggedFiles(dataTransfer: DataTransfer): boolean {
 
 function getFileIcon(name: string): IconName {
   const lower = name.toLowerCase();
-  if (/\.(ts|tsx|js|jsx|json|css|scss|html|xml|yaml|yml|sh|bash|sql)$/.test(lower)) return "Code";
+  if (
+    /\.(ts|tsx|js|jsx|json|css|scss|html|xml|yaml|yml|sh|bash|sql)$/.test(lower)
+  )
+    return "Code";
   if (/\.(md|txt|csv|log)$/.test(lower)) return "FileText";
-  if (/\.(png|jpg|jpeg|gif|svg|webp|ico|icns)$/.test(lower)) return "FileAttachment";
+  if (/\.(png|jpg|jpeg|gif|svg|webp|ico|icns)$/.test(lower))
+    return "FileAttachment";
   return "File";
 }
 
@@ -124,6 +138,7 @@ function useLongPressContextMenu() {
 function TreeRow({
   entry,
   expanded,
+  search,
   selected,
   onAction,
   onOpen,
@@ -135,6 +150,7 @@ function TreeRow({
 }: {
   entry: FileTreeEntry;
   expanded: boolean;
+  search: boolean;
   selected: boolean;
   onAction(action: FileAction, entry: FileTreeEntry): void;
   onOpen(path: string): void;
@@ -146,6 +162,7 @@ function TreeRow({
 }) {
   const longPress = useLongPressContextMenu();
   const [dropActive, setDropActive] = useState(false);
+  const parent = search ? parentLabel(entry.path, entry.name) : "";
   const open = () =>
     entry.kind === "directory" ? onToggle(entry.path) : onOpen(entry.path);
   return (
@@ -161,11 +178,17 @@ function TreeRow({
         aria-expanded={entry.kind === "directory" ? expanded : undefined}
         aria-selected={selected}
         className={`group flex h-[22px] shrink-0 cursor-default items-center gap-[6px] pr-2 text-[13px] text-muted-foreground outline-none hover:bg-state-hover focus-visible:ring-1 focus-visible:ring-ring aria-selected:bg-state-active aria-selected:text-foreground transition-colors ${dropActive ? "bg-state-active ring-1 ring-inset ring-primary" : ""}`}
-        style={{ paddingLeft: `${8 + depth(entry.path) * 12}px` }}
+        style={{
+          paddingLeft: `${search ? 8 : 8 + depth(entry.path) * 12}px`,
+        }}
         tabIndex={0}
         onClick={open}
         onDragOver={(event) => {
-          if (entry.kind !== "directory" || !hasDraggedFiles(event.dataTransfer)) return;
+          if (
+            entry.kind !== "directory" ||
+            !hasDraggedFiles(event.dataTransfer)
+          )
+            return;
           event.preventDefault();
           event.stopPropagation();
           event.dataTransfer.dropEffect = "copy";
@@ -179,7 +202,11 @@ function TreeRow({
           }
         }}
         onDrop={(event) => {
-          if (entry.kind !== "directory" || event.dataTransfer.files.length === 0) return;
+          if (
+            entry.kind !== "directory" ||
+            event.dataTransfer.files.length === 0
+          )
+            return;
           event.preventDefault();
           event.stopPropagation();
           setDropActive(false);
@@ -210,7 +237,10 @@ function TreeRow({
       >
         <span className="grid h-5 w-4 shrink-0 place-items-center opacity-70">
           {entry.kind === "directory" ? (
-            <Icon name={expanded ? "ChevronDown" : "ChevronRight"} className="h-3.5 w-3.5" />
+            <Icon
+              name={expanded ? "ChevronDown" : "ChevronRight"}
+              className="h-3.5 w-3.5"
+            />
           ) : null}
         </span>
         <Icon
@@ -224,7 +254,25 @@ function TreeRow({
           className="h-3.5 w-3.5 shrink-0 opacity-80 aria-selected:opacity-100 aria-selected:text-primary"
           aria-hidden
         />
-        <span className="min-w-0 flex-1 truncate">{highlightName(entry)}</span>
+        <span className="flex min-w-0 flex-1 items-baseline gap-2">
+          <span
+            className={
+              parent === ""
+                ? "min-w-0 flex-1 truncate"
+                : "max-w-[58%] shrink-0 truncate"
+            }
+          >
+            {highlightName(entry)}
+          </span>
+          {parent === "" ? null : (
+            <span
+              className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground/70"
+              title={entry.path}
+            >
+              {parent}
+            </span>
+          )}
+        </span>
         <button
           type="button"
           className="grid h-[18px] w-[18px] shrink-0 place-items-center rounded opacity-0 hover:bg-state-hover focus:opacity-100 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-all"
@@ -291,7 +339,10 @@ export function TreePane({
   showOpenPreferred: boolean;
   showSql: boolean;
   truncated: boolean;
-  uploadStatus: { kind: "uploading" | "success" | "error"; message: string } | null;
+  uploadStatus: {
+    kind: "uploading" | "success" | "error";
+    message: string;
+  } | null;
 }) {
   const [rootDropActive, setRootDropActive] = useState(false);
 
@@ -304,9 +355,15 @@ export function TreePane({
     return filterVisibleEntries(orderTreeEntries(entries), expandedDirs);
   }, [entries, expandedDirs, query]);
 
-  // An index that is still walking has nothing to show yet, so the row doubles
-  // as progress: elapsed time plus however many paths the walk has scanned.
-  const indexing = query.length > 0 && searchStatus.status === "indexing";
+  // A walk in progress has nothing to show yet, so the row doubles as progress:
+  // elapsed time plus however many paths the walk has scanned. The first search
+  // of a root also spends a moment before the server answers at all, and that
+  // silent moment is the one that reads as "nothing happened".
+  const searching = query.length > 0;
+  const indexing = searching && searchStatus.status === "indexing";
+  const awaitingIndex =
+    searching && !indexing && loading && entries.length === 0;
+  const showIndexNotice = indexing || awaitingIndex;
   const [clockMs, setClockMs] = useState(() => Date.now());
   useEffect(() => {
     if (!indexing) return;
@@ -316,13 +373,22 @@ export function TreePane({
   const elapsedSeconds =
     searchStatus.indexingSinceMs === null
       ? 0
-      : Math.max(0, Math.round((clockMs - searchStatus.indexingSinceMs) / 1000));
-  const footer =
-    query.length > 0 && searchStatus.status === "ready"
-      ? `${entries.length} matches${searchStatus.indexedCount > 0 ? ` · ${searchStatus.indexedCount.toLocaleString()} paths indexed` : ""}`
-      : `${entries.length} items`;
+      : Math.max(
+          0,
+          Math.round((clockMs - searchStatus.indexingSinceMs) / 1000),
+        );
+  const scanned =
+    searchStatus.indexedCount > 0
+      ? ` · ${searchStatus.indexedCount.toLocaleString()} paths scanned`
+      : "";
+  let footer = `${entries.length} items`;
+  if (searching) {
+    footer = indexing
+      ? `${entries.length} matches so far · still indexing`
+      : `${entries.length} matches${searchStatus.indexedCount > 0 ? ` · ${searchStatus.indexedCount.toLocaleString()} paths indexed` : ""}`;
+  }
   let footerNote = " · hidden files excluded";
-  if (query.length > 0) footerNote = "";
+  if (searching) footerNote = "";
   if (truncated) footerNote = " · results truncated";
 
   return (
@@ -395,7 +461,9 @@ export function TreePane({
           setRootDropActive(true);
         }}
         onDragLeave={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          if (
+            !event.currentTarget.contains(event.relatedTarget as Node | null)
+          ) {
             setRootDropActive(false);
           }
         }}
@@ -406,26 +474,44 @@ export function TreePane({
           onUpload("", Array.from(event.dataTransfer.files));
         }}
       >
-        {indexing ? (
-          <p className="p-2 text-xs text-muted-foreground" role="status">
-            Indexing files… {elapsedSeconds}s
-            {searchStatus.indexedCount > 0
-              ? ` · ${searchStatus.indexedCount.toLocaleString()} paths`
-              : ""}
-          </p>
+        {showIndexNotice ? (
+          <div
+            className="m-1 rounded-md border border-border/60 bg-muted/40 p-2 text-xs text-muted-foreground"
+            role="status"
+          >
+            <p className="flex items-center gap-1.5">
+              <Icon
+                name="Spinner"
+                className="h-3.5 w-3.5 shrink-0 animate-spin"
+                aria-hidden
+              />
+              <span className="min-w-0 flex-1">
+                {indexing
+                  ? `Indexing files… ${elapsedSeconds}s${scanned}`
+                  : "Indexing files…"}
+              </span>
+            </p>
+            <p className="mt-1 opacity-80">
+              The first search of a big folder walks it once, so give it up to a
+              minute. Later searches are answered instantly.
+            </p>
+          </div>
         ) : null}
         {error ? (
           <div className="m-2 rounded-md border border-surface-destructive-border bg-surface-destructive p-3 text-sm text-destructive-text">
             <p>{error}</p>
-            <Button className="mt-3" size="sm" variant="outline" onClick={onRefresh}>
+            <Button
+              className="mt-3"
+              size="sm"
+              variant="outline"
+              onClick={onRefresh}
+            >
               Retry
             </Button>
           </div>
-        ) : indexing ? (
-          // Still walking, and nothing matched yet: the progress line above is
-          // the whole state, so an empty-result message would be a lie.
-          null
-        ) : loading && entries.length === 0 ? (
+        ) : showIndexNotice ? // Still walking, and nothing matched yet: the notice
+        // above is the whole state, so an empty-result message would be a lie.
+        null : loading && entries.length === 0 ? (
           <p className="p-3 text-sm text-muted-foreground" role="status">
             Loading files…
           </p>
@@ -439,6 +525,7 @@ export function TreePane({
               key={entry.path}
               entry={entry}
               expanded={expandedDirs.has(entry.path)}
+              search={searching}
               selected={selectedPath === entry.path}
               onAction={onAction}
               onOpen={onOpen}
