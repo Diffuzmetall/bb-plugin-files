@@ -5,6 +5,7 @@ import {
   useState,
   type DragEvent as ReactDragEvent,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from "react";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
@@ -14,16 +15,70 @@ import {
   type FileAction,
 } from "./FileContextMenu";
 import type { FileTreeEntry } from "../hooks/useFilesWorkspace";
-import {
-  filterVisibleEntries,
-  orderTreeEntries,
-  searchSortEntries,
-} from "../tree-order";
+import { filterVisibleEntries, orderTreeEntries } from "../tree-order";
 
 import { type IconName } from "@/components/ui/icon";
 
 function depth(path: string): number {
   return path.split("/").length - 1;
+}
+
+/**
+ * How the search index is doing, as the panel needs it: `indexing` means the
+ * walk is still running, so the row is a progress line rather than an empty
+ * result. Optional so an app bundle built before the index landed still works.
+ */
+export interface SearchIndexStatus {
+  status: "ready" | "indexing";
+  indexedCount: number;
+  indexingSinceMs: number | null;
+}
+
+const IDLE_SEARCH_STATUS: SearchIndexStatus = {
+  status: "ready",
+  indexedCount: 0,
+  indexingSinceMs: null,
+};
+
+/**
+ * The file name with the matched characters marked. `positions` index into the
+ * entry's whole path (that is what the ranker scored), so they are shifted onto
+ * the name and simply dropped when the match sat in a parent directory.
+ */
+function highlightName(entry: FileTreeEntry): ReactNode {
+  const offset = entry.path.length - entry.name.length;
+  const marks = new Set<number>();
+  for (const position of entry.positions) {
+    if (position >= offset && position < offset + entry.name.length) {
+      marks.add(position - offset);
+    }
+  }
+  if (marks.size === 0) return entry.name;
+
+  const parts: ReactNode[] = [];
+  let plain = "";
+  for (let index = 0; index < entry.name.length; index += 1) {
+    if (!marks.has(index)) {
+      plain += entry.name[index];
+      continue;
+    }
+    if (plain !== "") {
+      parts.push(plain);
+      plain = "";
+    }
+    let run = entry.name[index];
+    while (index + 1 < entry.name.length && marks.has(index + 1)) {
+      index += 1;
+      run += entry.name[index];
+    }
+    parts.push(
+      <mark key={index} className="rounded-[2px] bg-primary/25 text-foreground">
+        {run}
+      </mark>,
+    );
+  }
+  if (plain !== "") parts.push(plain);
+  return parts;
 }
 
 function hasDraggedFiles(dataTransfer: DataTransfer): boolean {
@@ -169,7 +224,7 @@ function TreeRow({
           className="h-3.5 w-3.5 shrink-0 opacity-80 aria-selected:opacity-100 aria-selected:text-primary"
           aria-hidden
         />
-        <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+        <span className="min-w-0 flex-1 truncate">{highlightName(entry)}</span>
         <button
           type="button"
           className="grid h-[18px] w-[18px] shrink-0 place-items-center rounded opacity-0 hover:bg-state-hover focus:opacity-100 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-all"
@@ -209,6 +264,7 @@ export function TreePane({
   rootName,
   selectedPath,
   setQuery,
+  searchStatus = IDLE_SEARCH_STATUS,
   showAnnotate,
   showOpenPreferred,
   showSql,
@@ -230,6 +286,7 @@ export function TreePane({
   rootName: string;
   selectedPath: string | null;
   setQuery(value: string): void;
+  searchStatus?: SearchIndexStatus;
   showAnnotate: boolean;
   showOpenPreferred: boolean;
   showSql: boolean;
@@ -239,9 +296,34 @@ export function TreePane({
   const [rootDropActive, setRootDropActive] = useState(false);
 
   const visibleEntries = useMemo(() => {
-    if (query.length > 0) return searchSortEntries(entries);
+    if (query.length > 0) {
+      // Search hits arrive ranked by score; re-sorting them by folder would
+      // bury the best match under alphabetically earlier ones.
+      return entries;
+    }
     return filterVisibleEntries(orderTreeEntries(entries), expandedDirs);
   }, [entries, expandedDirs, query]);
+
+  // An index that is still walking has nothing to show yet, so the row doubles
+  // as progress: elapsed time plus however many paths the walk has scanned.
+  const indexing = query.length > 0 && searchStatus.status === "indexing";
+  const [clockMs, setClockMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!indexing) return;
+    const timer = window.setInterval(() => setClockMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [indexing]);
+  const elapsedSeconds =
+    searchStatus.indexingSinceMs === null
+      ? 0
+      : Math.max(0, Math.round((clockMs - searchStatus.indexingSinceMs) / 1000));
+  const footer =
+    query.length > 0 && searchStatus.status === "ready"
+      ? `${entries.length} matches${searchStatus.indexedCount > 0 ? ` · ${searchStatus.indexedCount.toLocaleString()} paths indexed` : ""}`
+      : `${entries.length} items`;
+  let footerNote = " · hidden files excluded";
+  if (query.length > 0) footerNote = "";
+  if (truncated) footerNote = " · results truncated";
 
   return (
     <aside className="flex h-full min-h-0 min-w-0 flex-col bg-background">
@@ -305,7 +387,7 @@ export function TreePane({
         className={`min-h-0 flex-1 overflow-y-auto px-1 pb-2 ${rootDropActive ? "bg-state-hover ring-1 ring-inset ring-primary" : ""}`}
         role="tree"
         aria-label="Project files"
-        aria-busy={loading || uploadStatus?.kind === "uploading"}
+        aria-busy={loading || indexing || uploadStatus?.kind === "uploading"}
         onDragOver={(event: ReactDragEvent<HTMLDivElement>) => {
           if (!hasDraggedFiles(event.dataTransfer)) return;
           event.preventDefault();
@@ -324,6 +406,14 @@ export function TreePane({
           onUpload("", Array.from(event.dataTransfer.files));
         }}
       >
+        {indexing ? (
+          <p className="p-2 text-xs text-muted-foreground" role="status">
+            Indexing files… {elapsedSeconds}s
+            {searchStatus.indexedCount > 0
+              ? ` · ${searchStatus.indexedCount.toLocaleString()} paths`
+              : ""}
+          </p>
+        ) : null}
         {error ? (
           <div className="m-2 rounded-md border border-surface-destructive-border bg-surface-destructive p-3 text-sm text-destructive-text">
             <p>{error}</p>
@@ -331,6 +421,10 @@ export function TreePane({
               Retry
             </Button>
           </div>
+        ) : indexing ? (
+          // Still walking, and nothing matched yet: the progress line above is
+          // the whole state, so an empty-result message would be a lie.
+          null
         ) : loading && entries.length === 0 ? (
           <p className="p-3 text-sm text-muted-foreground" role="status">
             Loading files…
@@ -369,8 +463,8 @@ export function TreePane({
         className="shrink-0 px-3 py-2 text-xs text-muted-foreground"
         role="status"
       >
-        {entries.length} items
-        {truncated ? " · results truncated" : " · hidden files excluded"}
+        {footer}
+        {footerNote}
       </div>
     </aside>
   );

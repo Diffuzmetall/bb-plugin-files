@@ -7,6 +7,14 @@ import {
   type FileScope,
 } from "./environment";
 import { duplicateDirectory, duplicateFile } from "./duplicate";
+import {
+  fileIndexCache,
+  indexFromPaths,
+  MAX_SEARCH_RESULTS,
+  walkDirectoryIndex,
+  type BuiltIndex,
+  type IndexEntry,
+} from "./file-index";
 import { listLocalDirectory } from "./host-directory";
 import {
   joinProjectPaths,
@@ -17,6 +25,9 @@ import {
 
 export const TREE_LIMIT = 10_000;
 export const MAX_TEXT_BYTES = 2 * 1024 * 1024;
+
+/** Sibling-plugin availability changes rarely and costs two RPCs to ask. */
+const OPENER_FLAGS_TTL_MS = 10_000;
 
 const ROOT_DOTFILE_PROBES = [
   ".gitignore", ".env", ".env.local", ".env.development", ".env.production",
@@ -82,62 +93,61 @@ async function appendRootDotfileProbes(
   environment: FileRoot,
   entries: TreeEntryLike[],
 ): Promise<void> {
-  await Promise.all(
-    ROOT_DOTFILE_PROBES.map(async (name) => {
+  const probe = async (name: string): Promise<void> => {
+    try {
+      const resolved = resolveProjectPath(environment.rootPath, name, { allowEmpty: false });
       try {
-        const resolved = resolveProjectPath(environment.rootPath, name, { allowEmpty: false });
-        try {
-          // Try reading as file
-          await bb.sdk.files.read({
-            hostId: environment.hostId,
-            rootPath: environment.rootPath,
-            path: resolved.absolutePath,
-          });
-          entries.push({
-            kind: "file",
-            path: name,
-            name: name,
-            score: 0,
-            positions: [],
-          });
-        } catch (e: any) {
-          // If it's a 404, it doesn't exist
-          const errorStr = String(e?.message || e);
-          if (errorStr.includes("404") || errorStr.includes("not exist") || errorStr.includes("path_not_found")) {
-            return; // Skip, it really doesn't exist
-          }
-
-          // If it failed but it's not a 404, it might be a directory
-          const dirResult = await bb.sdk.files.listPaths({
-            hostId: environment.hostId,
-            path: resolved.absolutePath,
-            includeFiles: true,
-            includeDirectories: true,
-            limit: 1000,
-          });
-          entries.push({
-            kind: "directory",
-            path: name,
-            name: name,
-            score: 0,
-            positions: [],
-          });
-          for (const child of dirResult.paths) {
-            const childPath = name + "/" + child.path;
-            entries.push({
-              kind: child.kind,
-              path: childPath,
-              name: child.name,
-              score: 0,
-              positions: [],
-            });
-          }
+        // Try reading as file
+        await bb.sdk.files.read({
+          hostId: environment.hostId,
+          rootPath: environment.rootPath,
+          path: resolved.absolutePath,
+        });
+        entries.push({
+          kind: "file",
+          path: name,
+          name: name,
+          score: 0,
+          positions: [],
+        });
+      } catch (e: any) {
+        // If it's a 404, it doesn't exist
+        const errorStr = String(e?.message || e);
+        if (errorStr.includes("404") || errorStr.includes("not exist") || errorStr.includes("path_not_found")) {
+          return; // Skip, it really doesn't exist
         }
-      } catch {
-        // Item does not exist, ignore
+
+        // If it failed but it's not a 404, it might be a directory
+        const dirResult = await bb.sdk.files.listPaths({
+          hostId: environment.hostId,
+          path: resolved.absolutePath,
+          includeFiles: true,
+          includeDirectories: true,
+          limit: 1000,
+        });
+        entries.push({
+          kind: "directory",
+          path: name,
+          name: name,
+          score: 0,
+          positions: [],
+        });
+        for (const child of dirResult.paths) {
+          entries.push({
+            kind: child.kind,
+            path: `${name}/${child.path}`,
+            name: child.name,
+            score: 0,
+            positions: [],
+          });
+        }
       }
-    })
-  );
+    } catch {
+      // Item does not exist, ignore
+    }
+  };
+
+  await Promise.all(ROOT_DOTFILE_PROBES.map(probe));
 }
 
 function fileMetadata(
@@ -158,40 +168,87 @@ export function createFileService(bb: BbPluginApi) {
     return resolveFileRoot(bb.sdk, scope);
   }
 
-  return {
-    async listTree({ scope, query }: { scope: FileScope; query: string }) {
-      const environment = await target(scope);
-      const result = await bb.sdk.files.listPaths({
+  let openerFlagsCache: {
+    atMs: number;
+    value: { annotateAvailable: boolean; sqlAvailable: boolean };
+  } | null = null;
+  async function cachedOpenerFlags() {
+    if (
+      openerFlagsCache !== null &&
+      Date.now() - openerFlagsCache.atMs < OPENER_FLAGS_TTL_MS
+    ) {
+      return openerFlagsCache.value;
+    }
+    const value = await openerPluginFlags(bb);
+    openerFlagsCache = { atMs: Date.now(), value };
+    return value;
+  }
+
+  /**
+   * Build a scope's index. The local host is walked directly — this server
+   * runs on that machine — which is what lets the build report progress and
+   * stop at a budget. Another machine's root can only be listed through the
+   * daemon, which reports nothing until it returns.
+   */
+  function buildIndex(
+    scope: FileScope,
+    environment: FileRoot,
+    onProgress: (scanned: number, entries: IndexEntry[]) => void,
+  ): Promise<BuiltIndex> {
+    if (environment.hostId === undefined) {
+      return walkDirectoryIndex({
+        rootPath: environment.rootPath,
+        // The panel's tree hides dot-entries on a host root, so the global
+        // index does too. A workspace keeps them: `.github` and `.pi` are
+        // exactly what one searches a repository for.
+        includeHidden: scope.kind === "thread",
+        onProgress,
+      });
+    }
+    return bb.sdk.files
+      .listPaths({
         hostId: environment.hostId,
         path: environment.rootPath,
         includeFiles: true,
         includeDirectories: true,
         limit: TREE_LIMIT,
-        ...(query.length > 0 ? { query } : {}),
-      });
-      const entries = result.paths.map((entry) => {
-        const parsed = parseRelativePath(entry.path, { allowEmpty: false });
-        return {
-          kind: entry.kind,
-          path: parsed.normalized,
-          name: entry.name,
-          score: entry.score,
-          positions: entry.positions,
-        };
-      });
+      })
+      .then((result) => ({
+        ...indexFromPaths(result.paths),
+        truncated: result.truncated,
+      }));
+  }
 
-      // A host root reads its own dot-entries, so only a workspace probes them.
-      if (query.length === 0 && scope.kind === "thread") {
-        await appendRootDotfileProbes(bb, environment, entries);
-      }
-
-      const openerFlags = await openerPluginFlags(bb);
+  return {
+    async listTree({
+      scope,
+      query,
+      force,
+    }: {
+      scope: FileScope;
+      query: string;
+      force?: boolean;
+    }) {
+      const environment = await target(scope);
+      const outcome = await fileIndexCache.search(scope, query, {
+        force,
+        build: (onProgress) => buildIndex(scope, environment, onProgress),
+      });
+      const openerFlags = await cachedOpenerFlags();
 
       return {
         rootName: rootLabel(scope, environment.rootPath),
-        entries,
-        truncated: result.truncated,
+        entries: outcome.entries,
+        // Either the index stops at its own ceiling (there are more paths than
+        // it holds) or the hit list is full, which also means "there is more".
+        truncated:
+          outcome.truncated ||
+          outcome.entries.length >= MAX_SEARCH_RESULTS,
         ...openerFlags,
+        status: outcome.status,
+        indexedCount: outcome.indexedCount,
+        indexedAtMs: outcome.indexedAtMs,
+        indexingSinceMs: outcome.indexingSinceMs,
       };
     },
 
@@ -229,7 +286,7 @@ export function createFileService(bb: BbPluginApi) {
         await appendRootDotfileProbes(bb, environment, entries);
       }
 
-      const openerFlags = await openerPluginFlags(bb);
+      const openerFlags = await cachedOpenerFlags();
 
       return {
         path: "",
@@ -372,7 +429,7 @@ export function createFileService(bb: BbPluginApi) {
       const resolved = resolveProjectPath(environment.rootPath, path, {
         allowEmpty: false,
       });
-      return bb.sdk.files.write({
+      const result = await bb.sdk.files.write({
         hostId: environment.hostId,
         rootPath: environment.rootPath,
         path: resolved.absolutePath,
@@ -380,6 +437,8 @@ export function createFileService(bb: BbPluginApi) {
         contentEncoding: "utf8",
         expectedSha256: null,
       });
+      fileIndexCache.invalidate(scope);
+      return result;
     },
 
     async createDirectory({
@@ -393,12 +452,14 @@ export function createFileService(bb: BbPluginApi) {
       const resolved = resolveProjectPath(environment.rootPath, path, {
         allowEmpty: false,
       });
-      return bb.sdk.files.mkdir({
+      const result = await bb.sdk.files.mkdir({
         hostId: environment.hostId,
         rootPath: environment.rootPath,
         path: resolved.absolutePath,
         recursive: false,
       });
+      fileIndexCache.invalidate(scope);
+      return result;
     },
 
     async movePath(input: {
@@ -417,12 +478,14 @@ export function createFileService(bb: BbPluginApi) {
         input.destinationPath,
         { allowEmpty: false },
       );
-      return bb.sdk.files.move({
+      const result = await bb.sdk.files.move({
         hostId: environment.hostId,
         rootPath: environment.rootPath,
         sourcePath: source.absolutePath,
         destinationPath: destination.absolutePath,
       });
+      fileIndexCache.invalidate(input.scope);
+      return result;
     },
 
     async removePath(input: {
@@ -434,12 +497,14 @@ export function createFileService(bb: BbPluginApi) {
       const resolved = resolveProjectPath(environment.rootPath, input.path, {
         allowEmpty: false,
       });
-      return bb.sdk.files.remove({
+      const result = await bb.sdk.files.remove({
         hostId: environment.hostId,
         rootPath: environment.rootPath,
         path: resolved.absolutePath,
         recursive: input.recursive,
       });
+      fileIndexCache.invalidate(input.scope);
+      return result;
     },
 
     async duplicatePath(input: {
@@ -455,9 +520,12 @@ export function createFileService(bb: BbPluginApi) {
         sourcePath: input.sourcePath,
         destinationPath: input.destinationPath,
       };
-      return input.kind === "file"
-        ? duplicateFile(args)
-        : duplicateDirectory(args);
+      const result =
+        input.kind === "file"
+          ? await duplicateFile(args)
+          : await duplicateDirectory(args);
+      fileIndexCache.invalidate(input.scope);
+      return result;
     },
 
     async getDownloadUrl({ scope, path }: { scope: FileScope; path: string }) {

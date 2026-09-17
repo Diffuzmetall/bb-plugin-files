@@ -32,7 +32,7 @@ current `^0.3.0` range are selected from those tags.
 - **Multi-Tab Editor**: open multiple files simultaneously with a modern tab bar. Tabs persist per file source (thread workspace or host root) and are restored when the panel is reopened;
 - **Two roots**: **Actions → Files** browses a thread's workspace, and **Files** in BB's left rail browses this machine's home directory with no repository involved. Both roots keep the full set of file operations;
 - **Resizable Layout**: Modern IDE-style interface with the editor on the left and a resizable, collapsible file tree on the right;
-- bounded recursive tree (up to 10,000 files) with fuzzy file search;
+- bounded recursive tree (up to 10,000 files), with search answered from a per-root path index: the tree is walked once, then every keystroke is ranked in memory (fzf) with the matched characters highlighted. Paths a workspace keeps are indexed with their dot-entries; the left-rail home root indexes visible entries only, and searches there report how many paths the index holds;
 - **Depth-first tree rendering**: accurately reconstructs project hierarchy with auto-expansion of active file paths;
 - **Hidden files support**: the left-rail root lists dot-entries directly, and a thread workspace probes and reveals common configuration dotfiles (e.g. `.env`, `.gitignore`, `.github`, `.vscode`, etc.) which are normally excluded by the host lister;
 - UTF-8 editing up to 2 MiB with CodeMirror 6;

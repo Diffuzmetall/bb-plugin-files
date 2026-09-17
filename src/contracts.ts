@@ -104,7 +104,14 @@ const duplicateResultSchema = z.discriminatedUnion("outcome", [
 
 export const filesRpcContract = defineRpcContract({
   listTree: {
-    input: z.object({ scope: fileScopeSchema, query: z.string() }).strict(),
+    input: z
+      .object({
+        scope: fileScopeSchema,
+        query: z.string(),
+        /** Rebuild the scope's path index instead of searching the cached one. */
+        force: z.boolean().optional(),
+      })
+      .strict(),
     output: z
       .object({
         rootName: z.string().min(1),
@@ -112,6 +119,12 @@ export const filesRpcContract = defineRpcContract({
         truncated: z.boolean(),
         annotateAvailable: z.boolean(),
         sqlAvailable: z.boolean(),
+        /** `indexing` means the walk is still running: poll again. */
+        status: z.enum(["ready", "indexing"]),
+        /** Paths in the index, or paths scanned so far while it builds. */
+        indexedCount: z.number().int().nonnegative(),
+        indexedAtMs: z.number().nullable(),
+        indexingSinceMs: z.number().nullable(),
       })
       .strict(),
   },
