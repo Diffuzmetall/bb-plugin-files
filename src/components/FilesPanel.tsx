@@ -320,6 +320,10 @@ function FilesPanelContent({
       openInPreferred(entry.path);
       return;
     }
+    if (action === "reveal") {
+      workspace.revealPath(entry.path);
+      return;
+    }
     if (action === "copy-path") {
       void navigator.clipboard.writeText(entry.path);
       return;
@@ -366,6 +370,7 @@ function FilesPanelContent({
       onChooseUpload={chooseUpload}
       onToggleDirectory={workspace.toggleDirectory}
       query={workspace.query}
+      reveal={workspace.reveal}
       rootName={workspace.rootName}
       searchStatus={workspace.searchStatus}
       selectedPath={workspace.activePath}

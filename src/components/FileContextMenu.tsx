@@ -18,6 +18,7 @@ export type FileAction =
   | "copy-path"
   | "download"
   | "upload"
+  | "reveal"
   | "annotate"
   | "open-sql"
   | "open-preferred";
@@ -36,6 +37,7 @@ export function FileContextMenu({
   onAction,
   showAnnotate,
   showOpenPreferred,
+  showReveal,
   showSql,
 }: {
   children: ReactNode;
@@ -44,6 +46,8 @@ export function FileContextMenu({
   showAnnotate: boolean;
   /** False where BB has no thread tab to open the file into. */
   showOpenPreferred: boolean;
+  /** True for search hits: a flat list gives no clue where the file lives. */
+  showReveal: boolean;
   showSql: boolean;
 }) {
   return (
@@ -88,6 +92,11 @@ export function FileContextMenu({
             <ContextMenuSeparator />
           </>
         )}
+        {showReveal ? (
+          <ContextMenuItem onSelect={() => onAction("reveal", entry)}>
+            <Icon name="FolderOpen" /> Show in folder
+          </ContextMenuItem>
+        ) : null}
         <ContextMenuItem onSelect={() => onAction("rename", entry)}>
           <Icon name="Edit" /> Rename
         </ContextMenuItem>

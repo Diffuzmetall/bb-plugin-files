@@ -381,6 +381,12 @@ export function useFilesWorkspace(
   );
   const canRead = scope !== null;
   const [query, setQuery] = useState("");
+  // The row the tree should scroll to. The nonce makes a repeat reveal of the
+  // same path scroll again instead of looking like nothing happened.
+  const [reveal, setReveal] = useState<{ path: string; nonce: number } | null>(
+    null,
+  );
+  const revealNonceRef = useRef(0);
   const [rootName, setRootName] = useState("Files");
   // Lazily-expanding tree state: children are fetched one directory at a
   // time (keyed by that directory's path, "" for the root) and dropped again
@@ -622,6 +628,29 @@ export function useFilesWorkspace(
       else expandDirectory(dirPath);
     },
     [collapseDirectory, expandDirectory],
+  );
+
+  /**
+   * Brings one path into view in the tree. Search answers are one flat list, so
+   * the only honest answer to "where does this live" is to open every folder
+   * above it and scroll to the row.
+   */
+  const revealPath = useCallback(
+    (path: string) => {
+      if (!canRead) return;
+      setQuery("");
+      for (
+        let directory = parentPath(path);
+        directory.length > 0;
+        directory = parentPath(directory)
+      ) {
+        // A path with `..` in it (a file outside the root) has no folder to open.
+        if (isCanonicalWorkspacePath(directory)) expandDirectory(directory);
+      }
+      revealNonceRef.current += 1;
+      setReveal({ path, nonce: revealNonceRef.current });
+    },
+    [canRead, expandDirectory],
   );
 
   const refreshTree = useCallback(
@@ -1351,6 +1380,8 @@ export function useFilesWorkspace(
       openInPreferredViewer,
       overwrite,
       query,
+      reveal,
+      revealPath,
       refreshTree: () => refreshTree(query, { force: true }),
       searchStatus,
       reloadFile,
@@ -1384,6 +1415,8 @@ export function useFilesWorkspace(
       openInPreferredViewer,
       overwrite,
       query,
+      reveal,
+      revealPath,
       refreshTree,
       searchStatus,
       reloadFile,
