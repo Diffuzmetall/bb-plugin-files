@@ -3,7 +3,11 @@ import { createHash } from "node:crypto";
 import type { BbPluginApi } from "@bb/plugin-sdk";
 import { resolveFileRoot, type FileScope } from "./environment";
 import { fileIndexCache } from "./file-index";
-import { joinProjectPaths, parseRelativePath, resolveProjectPath } from "./path-policy";
+import {
+  joinProjectPaths,
+  parseRelativePath,
+  resolveProjectPath,
+} from "./path-policy";
 
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
@@ -69,7 +73,10 @@ export async function readUploadBody(request: Request): Promise<Uint8Array> {
   if (declared !== null) {
     const size = Number(declared);
     if (!Number.isFinite(size) || size < 0) {
-      throw new UploadError(400, "content-length must be a non-negative number");
+      throw new UploadError(
+        400,
+        "content-length must be a non-negative number",
+      );
     }
     if (size > MAX_UPLOAD_BYTES) {
       throw new UploadError(413, "File exceeds the 25 MB upload limit");
@@ -131,7 +138,8 @@ export function createUploadHandler(bb: BbPluginApi) {
       if (result.outcome === "conflict") {
         throw new UploadError(409, `${resolved.relativePath} already exists`);
       }
-      if (result.sha256 !== sha256 || result.sizeBytes !== bytes.byteLength) { // ubs:ignore — public integrity metadata does not require constant-time comparison
+      if (result.sha256 !== sha256 || result.sizeBytes !== bytes.byteLength) {
+        // ubs:ignore — public integrity metadata does not require constant-time comparison
         throw new UploadError(502, "The uploaded file could not be verified");
       }
       // The new path must be searchable at once: the next search rebuilds.

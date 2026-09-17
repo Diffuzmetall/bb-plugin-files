@@ -40,7 +40,11 @@ function walk(
 
 describe("walkDirectoryIndex", () => {
   const tree: Record<string, Dirent[]> = {
-    "/root": [dirent("src", "directory"), dirent("app.tsx", "file"), dirent("node_modules", "directory")],
+    "/root": [
+      dirent("src", "directory"),
+      dirent("app.tsx", "file"),
+      dirent("node_modules", "directory"),
+    ],
     "/root/src": [
       dirent("components", "directory"),
       dirent("a.ts", "file"),
@@ -71,10 +75,15 @@ describe("walkDirectoryIndex", () => {
   });
 
   it("classifies a symlink by its target without descending into it", async () => {
-    const built = await walk(tree, { statImpl: async () => ({ isDirectory: () => false, isFile: () => true }) as unknown as Stats });
+    const built = await walk(tree, {
+      statImpl: async () =>
+        ({ isDirectory: () => false, isFile: () => true }) as unknown as Stats,
+    });
     const link = built.entries.find((entry) => entry.path === "src/link");
     expect(link?.kind).toBe("file");
-    expect(built.entries.map((entry) => entry.path)).not.toContain("src/link/hidden-through-link.ts");
+    expect(built.entries.map((entry) => entry.path)).not.toContain(
+      "src/link/hidden-through-link.ts",
+    );
   });
 
   it("truncates at the entry ceiling instead of walking the whole tree", async () => {
@@ -162,7 +171,10 @@ describe("FileIndexCache", () => {
     }),
   );
 
-  function countingBuild(): { build: () => Promise<BuiltIndex>; calls: () => number } {
+  function countingBuild(): {
+    build: () => Promise<BuiltIndex>;
+    calls: () => number;
+  } {
     let calls = 0;
     return {
       calls: () => calls,
@@ -220,7 +232,10 @@ describe("FileIndexCache", () => {
 
   it("rebuilds on force and after the TTL", async () => {
     let clock = 0;
-    const cache = new FileIndexCache(() => 1_000, () => clock);
+    const cache = new FileIndexCache(
+      () => 1_000,
+      () => clock,
+    );
     const counter = countingBuild();
     await cache.search(scope, "a", { build: counter.build, waitMs: 0 });
     await flush();
@@ -230,14 +245,20 @@ describe("FileIndexCache", () => {
     await flush();
     expect(counter.calls()).toBe(2);
 
-    await cache.search(scope, "a", { build: counter.build, force: true, waitMs: 0 });
+    await cache.search(scope, "a", {
+      build: counter.build,
+      force: true,
+      waitMs: 0,
+    });
     expect(counter.calls()).toBe(3);
     expect(cache.status(scope).status).toBe("indexing");
   });
 
   it("ranks the paths scanned so far while the build is still running", async () => {
     const cache = new FileIndexCache();
-    const build = (onProgress: (scanned: number, entries: IndexEntry[]) => void) =>
+    const build = (
+      onProgress: (scanned: number, entries: IndexEntry[]) => void,
+    ) =>
       new Promise<BuiltIndex>((resolve) => {
         onProgress(2, entries.slice(0, 2));
         void resolve;
