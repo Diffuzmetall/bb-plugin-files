@@ -171,10 +171,12 @@ function TreeRow({
       onAction={onAction}
       showAnnotate={showAnnotate}
       showOpenPreferred={showOpenPreferred}
+      showReveal={search}
       showSql={showSql}
     >
       <div
         role="treeitem"
+        data-path={entry.path}
         aria-expanded={entry.kind === "directory" ? expanded : undefined}
         aria-selected={selected}
         className={`group flex h-[22px] shrink-0 cursor-default items-center gap-[6px] pr-2 text-[13px] text-muted-foreground outline-none hover:bg-state-hover focus-visible:ring-1 focus-visible:ring-ring aria-selected:bg-state-active aria-selected:text-foreground transition-colors ${dropActive ? "bg-state-active ring-1 ring-inset ring-primary" : ""}`}
@@ -309,6 +311,7 @@ export function TreePane({
   onChooseUpload,
   onToggleDirectory,
   query,
+  reveal,
   rootName,
   selectedPath,
   setQuery,
@@ -331,6 +334,8 @@ export function TreePane({
   onChooseUpload(directory: string): void;
   onToggleDirectory(path: string): void;
   query: string;
+  /** Set by "Show in folder": scroll this row into view once it exists. */
+  reveal?: { path: string; nonce: number } | null;
   rootName: string;
   selectedPath: string | null;
   setQuery(value: string): void;
@@ -345,6 +350,8 @@ export function TreePane({
   } | null;
 }) {
   const [rootDropActive, setRootDropActive] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
+  const revealedNonceRef = useRef(0);
 
   const visibleEntries = useMemo(() => {
     if (query.length > 0) {
@@ -390,6 +397,27 @@ export function TreePane({
   let footerNote = " · hidden files excluded";
   if (searching) footerNote = "";
   if (truncated) footerNote = " · results truncated";
+
+  // The folder above a revealed row may still be loading when the request
+  // arrives, so the scroll waits for the row to exist and then fires once. The
+  // mark it leaves is temporary: "where did it land" is a moment, not a
+  // second selection competing with the file the user has open.
+  const [revealedPath, setRevealedPath] = useState<string | null>(null);
+  useEffect(() => {
+    if (!reveal || revealedNonceRef.current === reveal.nonce) return;
+    const row = listRef.current?.querySelector(
+      `[data-path="${CSS.escape(reveal.path)}"]`,
+    );
+    if (row === null || row === undefined) return;
+    revealedNonceRef.current = reveal.nonce;
+    row.scrollIntoView({ block: "center" });
+    setRevealedPath(reveal.path);
+  }, [reveal, visibleEntries]);
+  useEffect(() => {
+    if (revealedPath === null) return;
+    const timer = window.setTimeout(() => setRevealedPath(null), 2_500);
+    return () => window.clearTimeout(timer);
+  }, [revealedPath]);
 
   return (
     <aside className="flex h-full min-h-0 min-w-0 flex-col bg-background">
@@ -450,6 +478,7 @@ export function TreePane({
         />
       </div>
       <div
+        ref={listRef}
         className={`min-h-0 flex-1 overflow-y-auto px-1 pb-2 ${rootDropActive ? "bg-state-hover ring-1 ring-inset ring-primary" : ""}`}
         role="tree"
         aria-label="Project files"
@@ -526,7 +555,9 @@ export function TreePane({
               entry={entry}
               expanded={expandedDirs.has(entry.path)}
               search={searching}
-              selected={selectedPath === entry.path}
+              selected={
+                selectedPath === entry.path || revealedPath === entry.path
+              }
               onAction={onAction}
               onOpen={onOpen}
               onUpload={onUpload}
