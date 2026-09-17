@@ -362,12 +362,16 @@ export class FileIndexCache {
     const pending = this.pending.get(key);
     const waitMs = options.waitMs ?? MAX_INDEX_WAIT_MS;
     if (pending !== undefined && waitMs > 0) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
       await Promise.race([
         pending.done,
         new Promise<void>((resolve) => {
-          setTimeout(resolve, waitMs);
+          timer = setTimeout(resolve, waitMs);
         }),
       ]);
+      // A build that finished first must not leave the wait timer holding the
+      // event loop open until it expires.
+      if (timer !== undefined) clearTimeout(timer);
     }
 
     const status = this.status(scope);
