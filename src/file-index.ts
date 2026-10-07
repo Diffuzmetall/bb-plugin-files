@@ -86,14 +86,14 @@ const THREAD_INDEX_TTL_MS = 30_000;
 const HOST_INDEX_TTL_MS = 5 * 60_000;
 
 function defaultTtlMs(scope: FileScope): number {
-  return scope.kind === "thread" ? THREAD_INDEX_TTL_MS : HOST_INDEX_TTL_MS;
+  return scope.kind === "host" ? HOST_INDEX_TTL_MS : THREAD_INDEX_TTL_MS;
 }
 
 /** Scope key: the same root must never share a cache entry with another one. */
 export function scopeKey(scope: FileScope): string {
-  return scope.kind === "thread"
-    ? `thread:${scope.threadId}`
-    : `host:${scope.hostId ?? ""}:${scope.rootPath ?? ""}`;
+  if (scope.kind === "thread") return `thread:${scope.threadId}`;
+  if (scope.kind === "thread-storage") return `thread-storage:${scope.threadId}`;
+  return `host:${scope.hostId ?? ""}:${scope.rootPath ?? ""}`;
 }
 
 function toRelative(rootPath: string, absolutePath: string): string {

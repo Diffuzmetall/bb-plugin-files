@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useBbContext, useRpc } from "@bb/plugin-sdk/app";
-import type { PluginFileOpenerSource } from "@bb/plugin-sdk/app";
 import type { filesRpcContract } from "../../server";
 import { parentPath } from "../tree-order";
 import type { FileScope } from "../contracts";
+import { fileScopeSchema } from "../file-scope";
 
 export interface FileTreeEntry {
   kind: "file" | "directory";
@@ -59,11 +59,8 @@ export type SaveState =
   | { kind: "conflict"; currentSha256: string | null };
 
 export interface WorkspaceFileIdentity {
-  version: 1;
-  source: Pick<
-    PluginFileOpenerSource,
-    "kind" | "threadId" | "environmentId" | "projectId"
-  >;
+  version: 2;
+  scope: FileScope;
   path: string;
 }
 
@@ -85,6 +82,11 @@ interface StoredWorkspaceState {
   version: 2;
   openFiles: WorkspaceFileIdentity[];
   activeFileId: string | null;
+}
+
+interface RestoredWorkspaceFile {
+  identity: WorkspaceFileIdentity;
+  legacyId: string | null;
 }
 
 function message(error: unknown): string {
@@ -124,7 +126,7 @@ async function uploadFile(
   token: string,
 ): Promise<void> {
   const query = new URLSearchParams({ scope: scope.kind });
-  if (scope.kind === "thread") {
+  if (scope.kind === "thread" || scope.kind === "thread-storage") {
     query.set("threadId", scope.threadId);
   } else {
     if (scope.hostId !== undefined) query.set("hostId", scope.hostId);
@@ -149,30 +151,25 @@ async function uploadFile(
 }
 
 function workspaceFileId(identity: WorkspaceFileIdentity): string {
-  return JSON.stringify([
-    identity.version,
-    identity.source.kind,
-    identity.source.threadId,
-    identity.source.environmentId,
-    identity.source.projectId,
-    identity.path,
-  ]);
+  return JSON.stringify([identity.version, identity.scope, identity.path]);
 }
 
-function storageKey(source: WorkspaceFileIdentity["source"]): string {
-  return `${WORKSPACE_STORAGE_PREFIX}${JSON.stringify([source.threadId, source.environmentId, source.projectId])}`;
+function storageKey(scope: FileScope): string {
+  return `${WORKSPACE_STORAGE_PREFIX}${JSON.stringify(scope)}`;
 }
 
-function sameSource(
-  left: WorkspaceFileIdentity["source"],
-  right: WorkspaceFileIdentity["source"],
-): boolean {
-  return (
-    left.kind === right.kind &&
-    left.threadId === right.threadId &&
-    left.environmentId === right.environmentId &&
-    left.projectId === right.projectId
-  );
+function legacyStorageKey(scope: FileScope, projectId: string | null): string {
+  if (scope.kind === "thread") {
+    return `${WORKSPACE_STORAGE_PREFIX}${JSON.stringify([scope.threadId, null, projectId])}`;
+  }
+  if (scope.kind === "host") {
+    return `${WORKSPACE_STORAGE_PREFIX}${JSON.stringify([null, null, scope.rootPath ?? null])}`;
+  }
+  return `${WORKSPACE_STORAGE_PREFIX}${JSON.stringify([scope.threadId, null, projectId])}`;
+}
+
+function sameSource(left: FileScope, right: FileScope): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function isCanonicalWorkspacePath(path: string): boolean {
@@ -231,61 +228,88 @@ function limitWorkspaceFiles(
   return requested === null ? kept : [...kept, requested];
 }
 
-function asWorkspaceFileIdentity(value: unknown): WorkspaceFileIdentity | null {
+function asRestoredWorkspaceFile(value: unknown): RestoredWorkspaceFile | null {
   if (typeof value !== "object" || value === null) return null;
-  const item = value as Partial<WorkspaceFileIdentity>;
-  if (
-    item.version !== 1 ||
-    typeof item.path !== "string" ||
-    !isCanonicalWorkspacePath(item.path)
-  )
-    return null;
-  const source = item.source;
-  if (source?.kind === "workspace") {
-    // A workspace identity without a thread is not a root the server would
-    // accept, so it never restores.
-    if (typeof source.threadId !== "string" || source.threadId.length === 0)
-      return null;
-  } else if (source?.kind === "host") {
-    if (source.threadId !== null) return null;
-  } else {
-    return null;
+  const item = value as { version?: unknown; scope?: unknown; source?: unknown; path?: unknown };
+  if (typeof item.path !== "string" || !isCanonicalWorkspacePath(item.path)) return null;
+  if (item.version === 2) {
+    const parsedScope = fileScopeSchema.safeParse(item.scope);
+    return parsedScope.success
+      ? { identity: { version: 2, scope: parsedScope.data, path: item.path }, legacyId: null }
+      : null;
   }
+  if (item.version !== 1 || typeof item.source !== "object" || item.source === null) return null;
+  const source = item.source as {
+    kind?: unknown;
+    threadId?: unknown;
+    environmentId?: unknown;
+    projectId?: unknown;
+  };
   if (
-    (source.environmentId !== null &&
-      typeof source.environmentId !== "string") ||
+    (source.environmentId !== null && typeof source.environmentId !== "string") ||
     (source.projectId !== null && typeof source.projectId !== "string")
-  )
-    return null;
-  return { version: 1, source, path: item.path };
+  ) return null;
+  // Legacy host records lack an authoritative host ID; keep them isolated.
+  if (source.kind === "host") return null;
+  const scope: FileScope | null =
+    source.kind === "workspace" && typeof source.threadId === "string"
+      ? { kind: "thread", threadId: source.threadId }
+      : source.kind === "thread-storage" && typeof source.threadId === "string"
+        ? { kind: "thread-storage", threadId: source.threadId }
+        : null;
+  if (scope === null) return null;
+  return {
+    identity: { version: 2, scope, path: item.path },
+    legacyId: JSON.stringify([
+      1,
+      source.kind,
+      source.threadId,
+      source.environmentId,
+      source.projectId,
+      item.path,
+    ]),
+  };
 }
 
-function loadStoredWorkspace(
-  source: WorkspaceFileIdentity["source"],
-): StoredWorkspaceState {
+function loadStoredWorkspace(scope: FileScope, legacyProjectId: string | null): StoredWorkspaceState {
   const empty = { version: 2 as const, openFiles: [], activeFileId: null };
   if (typeof window === "undefined") return empty;
   try {
-    const raw = window.localStorage.getItem(storageKey(source));
+    const raw =
+      window.localStorage.getItem(storageKey(scope)) ??
+      window.localStorage.getItem(legacyStorageKey(scope, legacyProjectId));
     if (raw === null) return empty;
     const parsed = JSON.parse(raw) as Partial<StoredWorkspaceState>;
     if (parsed.version === 2 && Array.isArray(parsed.openFiles)) {
-      const openFiles = parsed.openFiles
-        .map(asWorkspaceFileIdentity)
+      const restored = parsed.openFiles
+        .map(asRestoredWorkspaceFile)
         .filter(
-          (value): value is WorkspaceFileIdentity =>
-            value !== null && sameSource(value.source, source),
+          (value): value is RestoredWorkspaceFile =>
+            value !== null && sameSource(value.identity.scope, scope),
         );
       const ids = new Set<string>();
-      const unique = openFiles.filter(
-        (file) =>
-          !ids.has(workspaceFileId(file)) && ids.add(workspaceFileId(file)),
+      const unique = restored.filter(({ identity }) => {
+        const id = workspaceFileId(identity);
+        return !ids.has(id) && ids.add(id);
+      });
+      const selected =
+        typeof parsed.activeFileId === "string"
+          ? unique.find(
+              ({ identity, legacyId }) =>
+                workspaceFileId(identity) === parsed.activeFileId ||
+                legacyId === parsed.activeFileId,
+            )
+          : undefined;
+      const selectedId =
+        selected === undefined ? undefined : workspaceFileId(selected.identity);
+      const limited = limitWorkspaceFiles(
+        unique.map(({ identity }) => identity),
+        selectedId,
       );
-      const limited = limitWorkspaceFiles(unique);
       const activeFileId =
-        typeof parsed.activeFileId === "string" &&
-        limited.some((file) => workspaceFileId(file) === parsed.activeFileId)
-          ? parsed.activeFileId
+        selectedId !== undefined &&
+        limited.some((file) => workspaceFileId(file) === selectedId)
+          ? selectedId
           : limited[0]
             ? workspaceFileId(limited[0])
             : null;
@@ -297,13 +321,10 @@ function loadStoredWorkspace(
   }
 }
 
-function saveStoredWorkspace(
-  source: WorkspaceFileIdentity["source"],
-  state: StoredWorkspaceState,
-): void {
+function saveStoredWorkspace(scope: FileScope, state: StoredWorkspaceState): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(storageKey(source), JSON.stringify(state));
+    window.localStorage.setItem(storageKey(scope), JSON.stringify(state));
   } catch {
     // Ignore storage failures. The editor still works without persisted tabs.
   }
@@ -314,15 +335,10 @@ function saveStoredWorkspace(
  * machine's global root (`host`), or — when a file link points outside the
  * workspace — one host directory that the file was opened from.
  */
-export type FilesRootScope =
-  | "thread"
-  | "host"
-  | { kind: "host"; hostId?: string; rootPath: string };
+export type FilesRootScope = "thread" | "host" | FileScope;
 
 function scopeIdentity(rootScope: FilesRootScope): string {
-  return typeof rootScope === "string"
-    ? rootScope
-    : `${rootScope.hostId ?? ""}\u0000${rootScope.rootPath}`;
+  return typeof rootScope === "string" ? rootScope : JSON.stringify(rootScope);
 }
 
 /** Shown while a scope has no live root to read. */
@@ -343,42 +359,17 @@ export function useFilesWorkspace(
   // A re-rooted panel receives a fresh scope object on every render, so the
   // identity string — not the object — keys the memos.
   const rootIdentity = scopeIdentity(rootScope);
-  const reRootedHostId =
-    typeof rootScope === "string" ? undefined : rootScope.hostId;
-  const reRootedRootPath =
-    typeof rootScope === "string" ? undefined : rootScope.rootPath;
-  // Root identity is resolved by the server for every RPC. Persisted state and
-  // component props never contribute to the authorization decision.
+  // Explicit targets retain the source thread or host; legacy panels still
+  // resolve their default scope from the active context.
   const scope = useMemo<FileScope | null>(() => {
-    if (rootIdentity === "thread") {
-      return context.threadId === null
-        ? null
-        : { kind: "thread", threadId: context.threadId };
-    }
-    if (reRootedRootPath === undefined) return { kind: "host" };
-    return reRootedHostId === undefined
-      ? { kind: "host", rootPath: reRootedRootPath }
-      : { kind: "host", hostId: reRootedHostId, rootPath: reRootedRootPath };
-  }, [context.threadId, reRootedHostId, reRootedRootPath, rootIdentity]);
-  const workspaceSource = useMemo(
-    () =>
-      rootIdentity !== "thread"
-        ? {
-            kind: "host" as const,
-            threadId: null,
-            environmentId: null,
-            // The root path is this panel's identity component, so tabs stay
-            // per directory instead of merging every host root into one set.
-            projectId: reRootedRootPath ?? null,
-          }
-        : {
-            kind: "workspace" as const,
-            threadId: context.threadId ?? "",
-            environmentId: null,
-            projectId: context.projectId,
-          },
-    [context.projectId, context.threadId, reRootedRootPath, rootIdentity],
-  );
+    if (typeof rootScope !== "string") return rootScope;
+    if (rootScope === "host") return { kind: "host" };
+    return context.threadId === null
+      ? null
+      : { kind: "thread", threadId: context.threadId };
+  }, [context.threadId, rootIdentity, rootScope]);
+  const workspaceScope: FileScope =
+    scope ?? { kind: "thread", threadId: "" };
   const canRead = scope !== null;
   const [query, setQuery] = useState("");
   // The row the tree should scroll to. The nonce makes a repeat reveal of the
@@ -414,8 +405,9 @@ export function useFilesWorkspace(
     [query, searchEntries, childrenByDir],
   );
 
+  const legacyProjectId = rootScope === "thread" ? context.projectId : null;
   const [initialWorkspace] = useState<StoredWorkspaceState>(() => {
-    const stored = loadStoredWorkspace(workspaceSource);
+    const stored = loadStoredWorkspace(workspaceScope, legacyProjectId);
     if (
       !canRead ||
       initialPath === null ||
@@ -423,8 +415,8 @@ export function useFilesWorkspace(
     )
       return stored;
     const initial = {
-      version: 1 as const,
-      source: workspaceSource,
+      version: 2 as const,
+      scope: workspaceScope,
       path: initialPath,
     };
     const initialId = workspaceFileId(initial);
@@ -459,8 +451,8 @@ export function useFilesWorkspace(
 
   const tabIdForPath = useCallback(
     (path: string) =>
-      workspaceFileId({ version: 1, source: workspaceSource, path }),
-    [workspaceSource],
+      workspaceFileId({ version: 2, scope: workspaceScope, path }),
+    [workspaceScope],
   );
   const tabsRef = useRef(tabs);
   const activePathRef = useRef(activePath);
@@ -485,16 +477,16 @@ export function useFilesWorkspace(
   );
 
   useEffect(() => {
-    saveStoredWorkspace(workspaceSource, {
+    saveStoredWorkspace(workspaceScope, {
       version: 2,
-      openFiles: tabs.map(({ version, source: tabSource, path }) => ({
+      openFiles: tabs.map(({ version, scope: tabScope, path }) => ({
         version,
-        source: tabSource,
+        scope: tabScope,
         path,
       })),
       activeFileId: activePath === null ? null : tabIdForPath(activePath),
     });
-  }, [activePath, tabIdForPath, tabs, workspaceSource]);
+  }, [activePath, tabIdForPath, tabs, workspaceScope]);
 
   useEffect(() => {
     if (!canRead) return;
@@ -861,7 +853,7 @@ export function useFilesWorkspace(
         return false;
       }
 
-      const identity = { version: 1 as const, source: workspaceSource, path };
+      const identity = { version: 2 as const, scope: workspaceScope, path };
       const newTab: TabState = {
         ...identity,
         id,
@@ -915,7 +907,7 @@ export function useFilesWorkspace(
         return false;
       }
     },
-    [canRead, rpc, tabIdForPath, scope, workspaceSource],
+    [canRead, rpc, tabIdForPath, scope, workspaceScope],
   );
 
   const closeFile = useCallback(
@@ -1175,8 +1167,8 @@ export function useFilesWorkspace(
                 ? destinationPath
                 : `${destinationPath}${t.path.slice(sourcePath.length)}`;
             const moved = {
-              version: 1 as const,
-              source: t.source,
+              version: 2 as const,
+              scope: t.scope,
               path: movedPath,
             };
             return {

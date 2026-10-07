@@ -309,6 +309,9 @@ export function TreePane({
   onRefresh,
   onUpload,
   onChooseUpload,
+  narrow = false,
+  onReturnToDocument,
+  onResizeSidebar,
   onToggleDirectory,
   query,
   reveal,
@@ -332,6 +335,9 @@ export function TreePane({
   onRefresh(): void;
   onUpload(directory: string, files: File[]): void;
   onChooseUpload(directory: string): void;
+  narrow?: boolean;
+  onReturnToDocument?(): void;
+  onResizeSidebar?(delta: number): void;
   onToggleDirectory(path: string): void;
   query: string;
   /** Set by "Show in folder": scroll this row into view once it exists. */
@@ -420,8 +426,13 @@ export function TreePane({
   }, [revealedPath]);
 
   return (
-    <aside className="flex h-full min-h-0 min-w-0 flex-col bg-background">
-      <div className="flex h-[34px] shrink-0 items-center gap-0.5 px-1.5">
+    <aside className="bb-files-tree flex h-full min-h-0 min-w-0 flex-col bg-background">
+      {narrow && onReturnToDocument ? (
+        <Button variant="ghost" className="mx-1 mt-1 h-11 shrink-0 justify-start" aria-label="Return to document" onClick={onReturnToDocument}>
+          <Icon name="ChevronLeft" className="h-4 w-4" /> Back to document
+        </Button>
+      ) : null}
+      <div className="bb-files-tree-actions flex h-[34px] shrink-0 items-center gap-0.5 px-1.5">
         <Icon name="FolderOpen" className="h-3.5 w-3.5" aria-hidden />
         <span className="min-w-0 flex-1 truncate text-xs font-medium">
           {rootName}
@@ -569,6 +580,12 @@ export function TreePane({
           ))
         )}
       </div>
+      {onResizeSidebar ? (
+        <div className="flex shrink-0 items-center justify-end gap-1 px-2">
+          <Button variant="ghost" size="icon" className="h-6 w-6" aria-label="Narrow file tree" onClick={() => onResizeSidebar(-40)}>−</Button>
+          <Button variant="ghost" size="icon" className="h-6 w-6" aria-label="Widen file tree" onClick={() => onResizeSidebar(40)}>+</Button>
+        </div>
+      ) : null}
       {uploadStatus ? (
         <div
           className={`shrink-0 px-3 py-2 text-xs ${uploadStatus.kind === "error" ? "text-destructive-text" : "text-muted-foreground"}`}

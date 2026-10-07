@@ -1,23 +1,10 @@
 import { defineRpcContract } from "@bb/plugin-sdk";
 import { z } from "zod";
+import { fileScopeSchema } from "./file-scope";
+export { fileScopeSchema } from "./file-scope";
+export type { FileScope, ResolvedFileTarget } from "./file-scope";
 
 const threadIdSchema = z.string().trim().min(1);
-
-/**
- * The root a request runs against. `thread` is the thread's live workspace;
- * `host` is an absolute root on a machine — with no `rootPath` it is this
- * machine's home directory, which is what the left-sidebar Files panel opens.
- */
-export const fileScopeSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("thread"), threadId: threadIdSchema }).strict(),
-  z
-    .object({
-      kind: z.literal("host"),
-      hostId: z.string().trim().min(1).optional(),
-      rootPath: z.string().min(1).optional(),
-    })
-    .strict(),
-]);
 const relativePathSchema = z.string();
 const targetPathSchema = z.string().min(1);
 
@@ -157,10 +144,8 @@ export const filesRpcContract = defineRpcContract({
       .strict(),
     output: z.object({ delivered: z.number().int().nonnegative() }).strict(),
   },
-  // A file link from another surface arrives as a path plus the source it
-  // belongs to. A workspace link stays in the thread scope; a host link is
-  // absolute on the thread's machine and becomes a host root at the file's own
-  // directory. Thread storage is not a root this panel can read.
+  // Resolve a linked path without consulting the active thread. The returned
+  // scope retains the source identity used by every later file operation.
   resolveOpenerFile: {
     input: z
       .object({ source: openerSourceSchema, path: z.string().min(1) })
@@ -179,6 +164,7 @@ export const filesRpcContract = defineRpcContract({
           reason: z.enum([
             "thread-storage",
             "not-absolute",
+            "invalid-path",
             "no-file-name",
             "no-thread",
           ]),
@@ -258,7 +244,6 @@ export const filesRpcContract = defineRpcContract({
   },
 });
 
-export type FileScope = z.infer<typeof fileScopeSchema>;
 export type TreeEntry = z.infer<typeof treeEntrySchema>;
 export type ReadFileResult = z.infer<typeof readFileResultSchema>;
 

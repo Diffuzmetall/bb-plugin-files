@@ -1,4 +1,5 @@
 import type { BbPluginApi } from "@bb/plugin-sdk";
+import { posix } from "node:path";
 import {
   hostTargetForAbsolutePath,
   resolveFileRoot,
@@ -221,7 +222,7 @@ export function createFileService(bb: BbPluginApi) {
         // The panel's tree hides dot-entries on a host root, so the global
         // index does too. A workspace keeps them: `.github` and `.pi` are
         // exactly what one searches a repository for.
-        includeHidden: scope.kind === "thread",
+        includeHidden: scope.kind !== "host",
         onProgress,
       });
     }
@@ -332,9 +333,8 @@ export function createFileService(bb: BbPluginApi) {
       });
     },
 
-    // A file link from another surface names its own source, and only an
-    // absolute host path has to be re-rooted: the panel cannot read outside its
-    // root, so it moves to the file's directory instead of widening the root.
+    // A file link from another surface names its own source. Resolve it without
+    // consulting the active thread and keep that identity for later operations.
     async resolveOpenerFile({
       source,
       path,
@@ -346,39 +346,84 @@ export function createFileService(bb: BbPluginApi) {
       };
       path: string;
     }) {
-      if (source.kind === "thread-storage") {
-        return {
-          kind: "unsupported" as const,
-          reason: "thread-storage" as const,
-        };
-      }
-      if (source.kind === "workspace" && !path.startsWith("/")) {
+      if (source.kind === "workspace") {
         if (source.threadId === null) {
           return { kind: "unsupported" as const, reason: "no-thread" as const };
         }
-        return {
-          kind: "file" as const,
-          scope: { kind: "thread" as const, threadId: source.threadId },
-          path,
-        };
+        try {
+          const normalized = parseRelativePath(
+            path.replace(/^(?:\.\/)+/u, ""),
+            { allowEmpty: false },
+          ).normalized;
+          return {
+            kind: "file" as const,
+            scope: { kind: "thread" as const, threadId: source.threadId },
+            path: normalized,
+          };
+        } catch {
+          return { kind: "unsupported" as const, reason: "invalid-path" as const };
+        }
+      }
+      if (source.kind === "thread-storage") {
+        if (source.threadId === null) {
+          return { kind: "unsupported" as const, reason: "no-thread" as const };
+        }
+        try {
+          const normalized = parseRelativePath(
+            path.replace(/^(?:\.\/)+/u, ""),
+            { allowEmpty: false },
+          ).normalized;
+          return {
+            kind: "file" as const,
+            scope: { kind: "thread-storage" as const, threadId: source.threadId },
+            path: normalized,
+          };
+        } catch {
+          return { kind: "unsupported" as const, reason: "invalid-path" as const };
+        }
       }
       if (!path.startsWith("/")) {
-        return {
-          kind: "unsupported" as const,
-          reason: "not-absolute" as const,
-        };
+        return { kind: "unsupported" as const, reason: "not-absolute" as const };
       }
-      // A host link is only readable on the machine that owns it, so an
-      // explicit host wins and otherwise the thread's own machine does.
       const hostId =
         source.experimental_hostId ??
         (source.threadId === null
           ? undefined
           : (await resolveThreadEnvironment(bb.sdk, source.threadId)).hostId);
-      const target = hostTargetForAbsolutePath(path, hostId);
-      return target === null
-        ? { kind: "unsupported" as const, reason: "no-file-name" as const }
-        : { kind: "file" as const, scope: target.scope, path: target.path };
+      const initialTarget = hostTargetForAbsolutePath(path, hostId);
+      if (initialTarget === null) {
+        return { kind: "unsupported" as const, reason: "no-file-name" as const };
+      }
+      let rootPath = posix.dirname(posix.normalize(path));
+      if (hostId !== undefined) {
+        const ancestors: string[] = [];
+        for (let candidate = rootPath; ; candidate = posix.dirname(candidate)) {
+          ancestors.push(candidate);
+          if (candidate === "/") break;
+        }
+        const markers = ancestors.map((candidate) => posix.join(candidate, ".git"));
+        try {
+          const { existence } = await bb.sdk.hosts.pathsExist({ hostId, paths: markers });
+          rootPath = ancestors.find((candidate) => existence[posix.join(candidate, ".git")]) ?? rootPath;
+        } catch {
+          // A failed root probe never widens the containing-directory boundary.
+        }
+      }
+      const absolutePath = posix.normalize(path);
+      const relativePath = posix.relative(rootPath, absolutePath);
+      try {
+        const normalized = parseRelativePath(relativePath, { allowEmpty: false }).normalized;
+        return {
+          kind: "file" as const,
+          scope:
+            hostId === undefined
+              ? { kind: "host" as const, rootPath }
+              : { kind: "host" as const, hostId, rootPath },
+          path: normalized,
+        };
+      } catch {
+        return { kind: "unsupported" as const, reason: "invalid-path" as const };
+      }
     },
 
     async readFile({ scope, path }: { scope: FileScope; path: string }) {

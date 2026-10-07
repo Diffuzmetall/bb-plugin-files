@@ -23,6 +23,7 @@ const captured = {
   navPanels: [] as NavPanelRegistration[],
 };
 let rpcHandlers: Record<string, (input: unknown) => unknown> = {};
+let openThreadPanelCalls = 0;
 let bbContext = { projectId: null as string | null, threadId: null as string | null };
 
 export function resetPluginRuntime() {
@@ -30,6 +31,7 @@ export function resetPluginRuntime() {
   captured.fileOpeners.length = 0;
   captured.navPanels.length = 0;
   rpcHandlers = {};
+  openThreadPanelCalls = 0;
   bbContext = { projectId: null, threadId: null };
 }
 
@@ -99,6 +101,19 @@ export function setBbContext(context: { projectId: string | null; threadId: stri
 
 export function useBbContext() {
   return bbContext;
+}
+
+export function useBbNavigate() {
+  return {
+    openThreadPanel() {
+      openThreadPanelCalls += 1;
+      return false;
+    },
+  };
+}
+
+export function getOpenThreadPanelCalls() {
+  return openThreadPanelCalls;
 }
 
 export function RuntimeProvider({ children }: { children: ReactNode }) {

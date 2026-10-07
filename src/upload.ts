@@ -40,8 +40,11 @@ function scopeFromQuery(context: PluginHttpContext): FileScope {
   if (mode === "thread") {
     return { kind: "thread", threadId: requiredQuery(context, "threadId") };
   }
+  if (mode === "thread-storage") {
+    return { kind: "thread-storage", threadId: requiredQuery(context, "threadId") };
+  }
   if (mode !== "host") {
-    throw new UploadError(400, "scope must be thread or host");
+    throw new UploadError(400, "scope must be thread, thread-storage, or host");
   }
   const rootPath = context.req.query("rootPath");
   const hostId = context.req.query("hostId");

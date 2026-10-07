@@ -328,3 +328,94 @@
 .bb-files-markdown-editor .tiptap ::selection {
   background: color-mix(in oklab, var(--primary) 22%, transparent);
 }
+
+.bb-files-panel[data-narrow="true"] .bb-files-editor-actions button,
+.bb-files-panel[data-narrow="true"] .bb-files-tree-actions button,
+.bb-files-panel[data-narrow="true"] .bb-files-tree [role="treeitem"] button {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.bb-files-panel[data-narrow="true"] .bb-files-tree-actions {
+  height: auto;
+  min-height: 44px;
+  flex-wrap: wrap;
+}
+
+.bb-files-panel[data-narrow="true"] .bb-files-tree input {
+  height: 44px;
+  font-size: 16px;
+}
+
+.bb-files-panel[data-narrow="true"] .bb-files-tree [role="treeitem"] {
+  height: 44px;
+}
+
+.bb-files-panel[data-narrow="true"] .bb-files-tree [role="treeitem"] button {
+  opacity: 1;
+}
+
+.bb-files-panel[data-narrow="true"] .bb-files-markdown-editor .tiptap {
+  padding: 1rem;
+  font-size: 16px;
+}
+
+/* A narrow desktop panel needs compact rows, not a touch-sized list. */
+@media (hover: hover) and (pointer: fine) {
+  .bb-files-panel[data-narrow="true"] .bb-files-tree-actions {
+    min-height: 36px;
+  }
+
+  .bb-files-panel[data-narrow="true"] .bb-files-tree-actions button,
+  .bb-files-panel[data-narrow="true"] .bb-files-tree [role="treeitem"] button {
+    min-width: 32px;
+    min-height: 32px;
+  }
+
+  .bb-files-panel[data-narrow="true"] .bb-files-tree input,
+  .bb-files-panel[data-narrow="true"] .bb-files-tree [role="treeitem"] {
+    height: 36px;
+  }
+}
+
+.bb-files-mobile-navigation { width: 100%; min-width: 0; border-bottom: 1px solid var(--border-seam); }
+.bb-files-mobile-identity { display: flex; align-items: center; gap: 4px; padding: 4px 6px; }
+.bb-files-mobile-back { display: grid; place-items: center; flex: 0 0 44px; width: 44px; height: 44px; border-radius: 6px; color: var(--muted-foreground); cursor: pointer; }
+.bb-files-mobile-picker { display: flex; align-items: center; flex: 1; min-width: 0; height: 48px; gap: 8px; padding: 0 8px; border-radius: 6px; text-align: left; cursor: pointer; }
+.bb-files-mobile-back:hover, .bb-files-mobile-picker:hover { background: var(--state-hover); }
+.bb-files-mobile-back:focus-visible, .bb-files-mobile-picker:focus-visible,
+.bb-files-mobile-open-row > button:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.bb-files-mobile-file { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3px; }
+.bb-files-mobile-name { display: flex; min-width: 0; font-size: 13px; line-height: 17px; font-weight: 600; }
+.bb-files-mobile-name > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bb-files-mobile-name > :last-child { flex-shrink: 0; }
+.bb-files-mobile-folder { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; line-height: 13px; color: var(--muted-foreground); }
+.bb-files-mobile-count { display: grid; place-items: center; min-width: 18px; height: 18px; border-radius: 4px; background: var(--muted); color: var(--muted-foreground); font-size: 11px; }
+.bb-files-mobile-tools { display: flex; align-items: center; gap: 4px; padding: 0 8px 4px; min-height: 48px; }
+.bb-files-mobile-tools button, .bb-files-mobile-sheet :is(button, a) { min-height: 44px; min-width: 44px; }
+.bb-files-mobile-tools [role="group"] { position: relative; isolation: isolate; margin-right: 0; gap: 0; }
+.bb-files-mobile-tools [role="group"]::before { content: ""; position: absolute; inset: 6px 0; z-index: -1; border-radius: 6px; background: var(--muted); }
+.bb-files-mobile-tools [role="group"] button { position: relative; isolation: isolate; min-width: 64px; background: transparent; font-size: 12px; }
+.bb-files-mobile-tools [role="group"] button[aria-pressed="true"]::before { content: ""; position: absolute; inset: 8px 2px; z-index: -1; border-radius: 4px; background: var(--background); }
+.bb-files-mobile-status { margin-left: auto; color: var(--muted-foreground); font-size: 11px; }
+.bb-files-mobile-status > span { font-size: inherit; }
+.bb-files-mobile-sheet { position: fixed; inset: auto auto 0 0; margin: 0; max-width: none; padding: 0; border: 1px solid var(--border-seam); border-radius: 14px 14px 0 0; background: var(--background); color: var(--foreground); overflow: hidden; }
+.bb-files-mobile-sheet[open] { display: flex; flex-direction: column; }
+.bb-files-mobile-sheet::backdrop { background: rgb(0 0 0 / 45%); }
+.bb-files-mobile-sheet-header { display: flex; flex-shrink: 0; align-items: center; gap: 8px; min-height: 64px; padding: 8px 12px 4px 18px; }
+.bb-files-mobile-sheet-header h2 { flex: 1; margin: 0; font-size: 16px; line-height: 24px; font-weight: 600; outline: none; }
+.bb-files-mobile-search { display: flex; flex-shrink: 0; align-items: center; gap: 8px; margin: 0 12px 10px; padding: 0 12px; border-radius: 8px; background: var(--muted); color: var(--muted-foreground); }
+.bb-files-mobile-search input { width: 100%; min-width: 0; height: 44px; background: transparent; color: var(--foreground); font-size: 16px; }
+.bb-files-mobile-open-list, .bb-files-mobile-menu { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 8px max(12px, env(safe-area-inset-bottom)); }
+.bb-files-mobile-open-row { display: flex; align-items: center; border-radius: 6px; }
+.bb-files-mobile-open-row[data-active="true"] { background: var(--muted); }
+.bb-files-mobile-open-row > button:first-child { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; padding: 10px; min-height: 64px; border-radius: 6px; text-align: left; cursor: pointer; }
+.bb-files-mobile-open-row > button:hover { background: var(--state-hover); }
+.bb-files-mobile-open-row > button:first-child > svg { color: var(--muted-foreground); }
+.bb-files-mobile-open-name { min-width: 0; flex: 1; overflow-wrap: anywhere; font-size: 13px; line-height: 1.45; }
+.bb-files-mobile-open-name > span { display: block; }
+.bb-files-mobile-open-name > span:last-child { margin-top: 4px; font-size: 11px; color: var(--muted-foreground); }
+.bb-files-mobile-empty { padding: 16px 10px; color: var(--muted-foreground); font-size: 13px; }
+.bb-files-mobile-menu :is(button, a) { justify-content: flex-start; gap: 12px; width: 100%; height: auto; padding: 0 12px; font-size: 13px; }
+.bb-files-mobile-menu :is(button, a):not(.bb-files-mobile-close)::after { content: attr(aria-label); }
+.bb-files-mobile-menu .bb-files-mobile-close { margin-top: 6px; border-top: 1px solid var(--border-seam); border-radius: 0; }

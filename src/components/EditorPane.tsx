@@ -4,6 +4,7 @@ import { Icon } from "@/components/ui/icon";
 import { CodeEditor } from "./CodeEditor";
 import { ExcalidrawEditor } from "./ExcalidrawEditor";
 import { MarkdownEditor } from "./MarkdownEditor";
+import { MobileFileNavigation } from "./MobileFileNavigation";
 import type { SaveState, TabState } from "../hooks/useFilesWorkspace";
 
 function isMarkdown(path: string): boolean {
@@ -72,6 +73,7 @@ export function EditorPane({
   onOpenInSql,
   showSql,
   onOpenPreferred,
+  onShowFiles,
   onToggleSidebar,
   isSidebarOpen,
   getDownloadUrl,
@@ -92,6 +94,7 @@ export function EditorPane({
   onOpenInSql(path: string): void;
   showSql: boolean;
   onOpenPreferred(path: string): void;
+  onShowFiles(): void;
   onToggleSidebar?(): void;
   isSidebarOpen?: boolean;
   getDownloadUrl(path: string): Promise<string>;
@@ -130,69 +133,20 @@ export function EditorPane({
     return () => void (cancelled = true);
   }, [file?.path, file?.sha256, isImage, isHtml, getDownloadUrl]);
 
-  return (
-    <section className="flex h-full min-h-0 min-w-0 flex-col bg-background">
-      {/* TAB BAR */}
-      <div className="relative flex h-8 shrink-0 items-center overflow-hidden bg-background/50">
-        <div className="flex h-full min-w-0 flex-1 items-center overflow-x-auto no-scrollbar">
-          <div className="flex h-full shrink-0 flex-nowrap items-center">
-            {tabs.map(tab => {
-            const isActive = tab.path === activePath;
-            const tabIsDirty = tab.file?.state === "text" && tab.draftText !== tab.savedText;
-            const name = tab.path.split("/").pop() || "";
-            return (
-              <div 
-                key={tab.path}
-                onClick={() => onTabSelect(tab.path)}
-                className={`group relative flex h-[30px] max-w-[200px] shrink-0 cursor-pointer items-center gap-1.5 px-2.5 text-xs transition-colors ${
-                  isActive ? "bg-background text-foreground" : "bg-muted/20 text-muted-foreground hover:bg-muted/40"
-                }`}
-              >
-                <Icon name={getFileIconForEditor(name) as any} className="h-3.5 w-3.5 opacity-80" />
-                <span className="min-w-0 flex-1 truncate select-none">
-                  {name}
-                </span>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onTabClose(tab.path);
-                  }}
-                  className="grid h-4 w-4 shrink-0 place-items-center rounded-sm text-muted-foreground opacity-0 transition-opacity hover:bg-muted-foreground/20 hover:text-foreground group-hover:opacity-100"
-                  aria-label="Close file"
-                >
-                  {tabIsDirty ? (
-                    <div className="h-2 w-2 rounded-full bg-foreground opacity-100" />
-                  ) : (
-                    <Icon name="X" className="h-3 w-3" />
-                  )}
-                </button>
-                {/* Always show dirty dot when not hovered */}
-                {tabIsDirty && (
-                  <div className="absolute right-3.5 h-2 w-2 rounded-full bg-foreground opacity-100 group-hover:opacity-0 transition-opacity pointer-events-none" />
-                )}
-              </div>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="relative flex h-full shrink-0 items-center gap-0.5 bg-background px-1 before:pointer-events-none before:absolute before:inset-y-0 before:right-full before:w-4 before:bg-gradient-to-r before:from-transparent before:to-background">
-          {isHtml && file?.state === "text" ? (
+  const openPreview = (isHtml && file?.state === "text" ? (
             <Button
+              asChild
               size="icon"
               variant="ghost"
-              className="h-6 w-6 text-muted-foreground hover:text-foreground"
+              className="h-6 w-6 text-muted-foreground hover:text-foreground aria-disabled:pointer-events-none aria-disabled:opacity-50"
               aria-label="Open preview"
-              disabled={!previewSrc}
-              onClick={() => {
-                if (!previewSrc) return;
-                window.open(previewSrc, "_blank", "noopener,noreferrer");
-              }}
             >
-              <Icon name="ExternalLink" className="h-3.5 w-3.5" />
+              <a href={previewSrc ?? undefined} target="_blank" rel="noopener noreferrer" role="link" aria-disabled={!previewSrc} tabIndex={previewSrc ? 0 : -1}>
+                <Icon name="ExternalLink" className="h-3.5 w-3.5" />
+              </a>
             </Button>
-          ) : null}
-          {(markdown || isHtml) && file?.state === "text" ? (
+          ) : null);
+  const viewModes = ((markdown || isHtml) && file?.state === "text" ? (
             <div
               className="mr-0.5 flex shrink-0 items-center gap-0.5"
               role="group"
@@ -217,8 +171,8 @@ export function EditorPane({
                 Raw
               </Button>
             </div>
-          ) : null}
-          {file !== null ? (
+          ) : null);
+  const fileActions = (file !== null ? (
             <>
               {showOpenPreferred ? (
                 <Button
@@ -282,7 +236,71 @@ export function EditorPane({
                 <Icon name={copied ? "Check" : "Copy"} className="h-3.5 w-3.5" />
               </Button>
             </>
-          ) : null}
+          ) : null);
+
+  return (
+    <section className="flex h-full min-h-0 min-w-0 flex-col bg-background">
+      {/* TAB BAR */}
+      <div className="relative flex min-h-8 shrink-0 flex-wrap items-center bg-background/50">
+        {narrow ? (
+          <MobileFileNavigation
+            tabs={tabs}
+            activePath={activePath}
+            onTabSelect={onTabSelect}
+            onTabClose={onTabClose}
+            onShowFiles={onShowFiles}
+            modes={viewModes}
+            status={file?.state === "text" ? <SaveLabel state={saveState} dirty={Boolean(isDirty)} /> : <span>{fileLoading ? "Loading…" : "Read only"}</span>}
+            actions={<>{openPreview}{fileActions}</>}
+          />
+        ) : (
+        <div className="flex h-8 min-w-[100px] flex-1 items-center overflow-x-auto no-scrollbar">
+          <div className="flex h-full shrink-0 flex-nowrap items-center">
+            {tabs.map(tab => {
+            const isActive = tab.path === activePath;
+            const tabIsDirty = tab.file?.state === "text" && tab.draftText !== tab.savedText;
+            const name = tab.path.split("/").pop() || "";
+            return (
+              <div
+                key={tab.path}
+                onClick={() => onTabSelect(tab.path)}
+                className={`group relative flex h-[30px] max-w-[200px] shrink-0 cursor-pointer items-center gap-1.5 px-2.5 text-xs transition-colors ${
+                  isActive ? "bg-background text-foreground" : "bg-muted/20 text-muted-foreground hover:bg-muted/40"
+                }`}
+              >
+                <Icon name={getFileIconForEditor(name) as any} className="h-3.5 w-3.5 opacity-80" />
+                <span className="min-w-0 flex-1 truncate select-none">
+                  {name}
+                </span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTabClose(tab.path);
+                  }}
+                  className="grid h-4 w-4 shrink-0 place-items-center rounded-sm text-muted-foreground opacity-0 transition-opacity hover:bg-muted-foreground/20 hover:text-foreground group-hover:opacity-100"
+                  aria-label="Close file"
+                >
+                  {tabIsDirty ? (
+                    <div className="h-2 w-2 rounded-full bg-foreground opacity-100" />
+                  ) : (
+                    <Icon name="X" className="h-3 w-3" />
+                  )}
+                </button>
+                {/* Always show dirty dot when not hovered */}
+                {tabIsDirty && (
+                  <div className="absolute right-3.5 h-2 w-2 rounded-full bg-foreground opacity-100 group-hover:opacity-0 transition-opacity pointer-events-none" />
+                )}
+              </div>
+              );
+            })}
+          </div>
+        </div>
+
+        )}
+        {!narrow ? <div className="bb-files-editor-actions relative flex min-h-8 max-w-full shrink-0 flex-wrap items-center gap-0.5 bg-background px-1 before:pointer-events-none before:absolute before:inset-y-0 before:right-full before:w-4 before:bg-gradient-to-r before:from-transparent before:to-background">
+          {openPreview}
+          {viewModes}
+          {fileActions}
 
           {!isSidebarOpen && onToggleSidebar ? (
             <>
@@ -298,7 +316,7 @@ export function EditorPane({
               </Button>
             </>
           ) : null}
-        </div>
+        </div> : null}
       </div>
 
       {/* MAIN CONTENT AREA */}
@@ -396,7 +414,7 @@ export function EditorPane({
           </div>
           <div className="flex h-6 shrink-0 items-center justify-between bg-background px-3 text-[11px] text-muted-foreground select-none">
             <div className="flex items-center gap-3">
-              {file.state === "text" ? (
+              {!narrow && file.state === "text" ? (
                 <span className="flex items-center gap-1.5">
                   <div className={`h-1.5 w-1.5 rounded-full ${isDirty ? 'bg-amber-500' : 'bg-emerald-500'}`} />
                   {isDirty ? 'Unsaved' : 'Saved'}

@@ -1,6 +1,8 @@
 import { homedir } from "node:os";
 import { posix } from "node:path";
 import type { BbPluginApi } from "@bb/plugin-sdk";
+import type { FileScope, ResolvedFileTarget } from "./file-scope";
+export type { FileScope } from "./file-scope";
 
 export interface FileRoot {
   /** Omitted targets the local host (see `bb.sdk.files`). */
@@ -16,10 +18,6 @@ export interface FileRoot {
  *   left sidebar, which has no thread. Without `rootPath` the root is this
  *   machine's home directory, which is the global root the sidebar offers.
  */
-export type FileScope =
-  | { kind: "thread"; threadId: string }
-  | { kind: "host"; hostId?: string; rootPath?: string };
-
 type BbSdk = BbPluginApi["sdk"];
 
 /** Resolve the thread environment afresh for every filesystem request. */
@@ -62,6 +60,10 @@ export async function resolveFileRoot(
   if (scope.kind === "thread") {
     return resolveThreadEnvironment(sdk, scope.threadId);
   }
+  if (scope.kind === "thread-storage") {
+    const location = await sdk.threads.storageLocation({ threadId: scope.threadId });
+    return { hostId: location.hostId, rootPath: location.storageRootPath };
+  }
   if (scope.rootPath !== undefined) {
     return scope.hostId === undefined
       ? { rootPath: scope.rootPath }
@@ -90,10 +92,12 @@ export async function resolveFileRoot(
 export function hostTargetForAbsolutePath(
   path: string,
   hostId: string | undefined,
-): { scope: FileScope; path: string } | null {
-  const name = posix.basename(path);
-  if (!path.startsWith("/") || name.length === 0) return null;
-  const rootPath = posix.dirname(path);
+): ResolvedFileTarget | null {
+  if (!path.startsWith("/")) return null;
+  const normalizedPath = posix.normalize(path);
+  const name = posix.basename(normalizedPath);
+  if (name.length === 0) return null;
+  const rootPath = posix.dirname(normalizedPath);
   return {
     path: name,
     scope:

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { useEffect } from "react";
+import { StrictMode, useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FilesPanel, FILE_OPENER_EXTENSIONS } from "./app";
 
@@ -19,23 +19,50 @@ vi.mock("@excalidraw/excalidraw", () => ({
 }));
 import {
   getCapturedPluginApp,
+  getOpenThreadPanelCalls,
   setBbContext,
   setRpcHandlers,
 } from "./test/plugin-sdk-app-runtime";
 
 class TestResizeObserver {
+  static width = 900;
+  static panels = new Set<TestResizeObserver>();
   constructor(private readonly callback: ResizeObserverCallback) {}
-  observe() {
-    this.callback(
-      [{ contentRect: { width: 900 } } as ResizeObserverEntry],
-      this,
-    );
+  observe(target: Element) {
+    if (target.matches(".bb-files-panel")) TestResizeObserver.panels.add(this);
+    this.emit(TestResizeObserver.width);
   }
-  disconnect() {}
+  emit(width: number) {
+    this.callback([{ contentRect: { width } } as ResizeObserverEntry], this);
+  }
+  static resize(width: number) {
+    TestResizeObserver.width = width;
+    for (const observer of TestResizeObserver.panels) observer.emit(width);
+  }
+  disconnect() { TestResizeObserver.panels.delete(this); }
   unobserve() {}
 }
 
+// JSDOM has no native dialog API; only Chromium checks focus trapping/Escape.
+const dialogMethods = {
+  showModal: Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, "showModal"),
+  close: Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, "close"),
+};
+
 beforeEach(() => {
+  Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
+    configurable: true,
+    value: function (this: HTMLDialogElement) { this.open = true; },
+  });
+  Object.defineProperty(HTMLDialogElement.prototype, "close", {
+    configurable: true,
+    value: function (this: HTMLDialogElement) {
+      this.open = false;
+      this.dispatchEvent(new Event("close"));
+    },
+  });
+  TestResizeObserver.width = 900;
+  TestResizeObserver.panels.clear();
   setBbContext({ projectId: null, threadId: "thread-1" });
   Object.defineProperty(Range.prototype, "getClientRects", {
     configurable: true,
@@ -65,12 +92,275 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  for (const key of ["showModal", "close"] as const) {
+    if (dialogMethods[key]) Object.defineProperty(HTMLDialogElement.prototype, key, dialogMethods[key]!);
+    else Reflect.deleteProperty(HTMLDialogElement.prototype, key);
+  }
   window.localStorage.clear();
   Reflect.deleteProperty(Range.prototype, "getClientRects");
   vi.unstubAllGlobals();
 });
 
 describe("Files plugin app", () => {
+  function responsiveFiles(content = "# Hello", readFile?: (input: unknown) => unknown) {
+    const entries = ["README.md", "notes.md"].map((path) => ({
+      kind: "file" as const, path, name: path, score: 0, positions: [],
+    }));
+    setRpcHandlers({
+      listDirectory: () => ({ path: "", rootName: "repo", entries, annotateAvailable: false, sqlAvailable: false }),
+      listTree: (input: unknown) => ({ rootName: "repo", entries: entries.filter((entry) => entry.path.includes((input as { query: string }).query)), truncated: false, status: "ready", indexedCount: 2, indexingSinceMs: null }),
+      readFile: readFile ?? ((input: unknown) => ({ state: "text", path: (input as { path: string }).path, sha256: "sha", sizeBytes: content.length, mimeType: "text/markdown", modifiedAtMs: 1, content })),
+      saveFile: () => ({ outcome: "conflict", currentSha256: "external-change" }),
+    });
+    return render(<FilesPanel threadId="thread-1" params={null} />);
+  }
+
+  it("keeps the mobile HTML preview link scoped, disabled while loading, and isolated from its opener", async () => {
+    TestResizeObserver.width = 390;
+    const entries = [{ kind: "file", path: "page.html", name: "page.html", score: 0, positions: [] }];
+    let resolvePreview!: (result: { url: string }) => void;
+    const preview = new Promise<{ url: string }>((resolve) => { resolvePreview = resolve; });
+    setRpcHandlers({
+      listDirectory: () => ({ path: "", rootName: "repo", entries, annotateAvailable: false, sqlAvailable: false }),
+      listTree: () => ({ rootName: "repo", entries, truncated: false, status: "ready", indexedCount: 1, indexingSinceMs: null }),
+      readFile: () => ({ state: "text", path: "page.html", sha256: "sha", sizeBytes: 11, mimeType: "text/html", modifiedAtMs: 1, content: "<p>Demo</p>" }),
+      getDownloadUrl: () => preview,
+    });
+    const view = render(<FilesPanel threadId="html-preview-test" params={null} />);
+    fireEvent.click(await view.findByRole("treeitem", { name: /page\.html/ }));
+    fireEvent.click(await view.findByRole("button", { name: "File actions" }));
+    const link = await view.findByRole("link", { name: "Open preview" });
+    expect(link.getAttribute("href")).toBeNull();
+    expect(link.getAttribute("aria-disabled")).toBe("true");
+    await act(async () => resolvePreview({ url: "/previews/demo/page.html" }));
+    expect(link.getAttribute("href")).toBe("/previews/demo/page.html?t=sha");
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    fireEvent.click(link);
+    await waitFor(() => expect(view.queryByRole("dialog", { name: "File actions" })).toBeNull());
+  });
+
+  it("wraps keyboard focus at both mobile sheet boundaries", async () => {
+    TestResizeObserver.width = 390;
+    const view = responsiveFiles();
+    fireEvent.click(await view.findByRole("treeitem", { name: /README\.md/ }));
+    for (const name of ["Open files", "File actions"]) {
+      const trigger = await view.findByRole("button", { name });
+      fireEvent.click(trigger);
+      const sheet = await view.findByRole("dialog", { name });
+      const controls = sheet.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), a[href]:not([aria-disabled="true"])');
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      first.focus();
+      expect(fireEvent.keyDown(first, { key: "Tab", shiftKey: true })).toBe(false);
+      expect(document.activeElement).toBe(last);
+      expect(fireEvent.keyDown(last, { key: "Tab" })).toBe(false);
+      expect(document.activeElement).toBe(first);
+      fireEvent.click(view.getByRole("button", { name: "Close dialog" }));
+      expect(document.activeElement).toBe(trigger);
+    }
+  });
+
+  it("returns to files without closing the document and retains Raw, search and open files", async () => {
+    TestResizeObserver.width = 390;
+    const view = responsiveFiles();
+    const search = view.getByRole("textbox", { name: "Search files" });
+    fireEvent.click(await view.findByRole("treeitem", { name: /README\.md/ }));
+    await view.findByRole("textbox", { name: "Editing preview of README.md" });
+    fireEvent.click(view.getByRole("button", { name: "Raw" }));
+    const editor = await view.findByLabelText("Editing README.md");
+    fireEvent.click(view.getByRole("button", { name: "Show files" }));
+    expect(editor.isConnected).toBe(true);
+    expect(view.getByRole("textbox", { name: "Search files" })).toBe(search);
+    expect(document.activeElement).toBe(search);
+    fireEvent.change(search, { target: { value: "notes" } });
+    fireEvent.click(view.getByRole("button", { name: "Return to document" }));
+    expect(view.getByLabelText("Editing README.md")).toBe(editor);
+    expect(document.activeElement).toBe(view.getByRole("button", { name: "Open files" }));
+    fireEvent.click(view.getByRole("button", { name: "Show files" }));
+    fireEvent.click(await view.findByRole("treeitem", { name: /notes\.md/ }));
+    const switcher = await view.findByRole("button", { name: "Open files" });
+    const back = view.getByRole("button", { name: "Show files" });
+    expect(back.textContent).toBe("");
+    expect(back.querySelector('[data-icon="FolderOpen"]')).toBeTruthy();
+    expect(view.queryByRole("button", { name: "Download file" })).toBeNull();
+    fireEvent.click(switcher);
+    const picker = await view.findByRole("dialog", { name: "Open files" });
+    expect(document.activeElement).toBe(view.getByRole("button", { name: "Close dialog" }));
+    expect(picker.querySelectorAll('[aria-label^="Switch to "]')).toHaveLength(2);
+    fireEvent.click(view.getByRole("button", { name: "Close dialog" }));
+    expect(document.activeElement).toBe(switcher);
+    fireEvent.click(switcher);
+    const cancel = new Event("cancel", { cancelable: true });
+    fireEvent(picker, cancel);
+    expect(cancel.defaultPrevented).toBe(true);
+    expect((picker as HTMLDialogElement).open).toBe(false);
+    expect(document.activeElement).toBe(switcher);
+    fireEvent.click(switcher);
+    fireEvent.change(view.getByRole("searchbox", { name: "Search open files" }), { target: { value: "readme" } });
+    expect(view.queryByRole("button", { name: "Switch to notes.md" })).toBeNull();
+    fireEvent.click(view.getByRole("button", { name: "Switch to README.md" }));
+    await view.findByRole("textbox", { name: "Editing preview of README.md" });
+    fireEvent.click(view.getByRole("button", { name: "Show files" }));
+    expect((search as HTMLInputElement).value).toBe("notes");
+    fireEvent.change(search, { target: { value: "" } });
+    fireEvent.click(await view.findByRole("treeitem", { name: /README\.md/ }));
+    expect(await view.findByRole("button", { name: "Open files" })).toBe(switcher);
+    fireEvent.click(view.getByRole("button", { name: "File actions" }));
+    expect(view.getByRole("button", { name: "Download file" })).toBeTruthy();
+    fireEvent.click(view.getByRole("button", { name: "Close file" }));
+    await view.findByRole("textbox", { name: "Editing preview of notes.md" });
+    fireEvent.click(switcher);
+    fireEvent.click(view.getByRole("button", { name: "Close notes.md" }));
+    await waitFor(() => expect(view.queryByRole("button", { name: "Open files" })).toBeNull());
+    expect(view.getByRole("textbox", { name: "Search files" })).toBe(search);
+  });
+
+  it("does not leave the file list when an earlier document read completes", async () => {
+    TestResizeObserver.width = 390;
+    let finishRead!: (reply: unknown) => void;
+    const pendingRead = new Promise((resolve) => { finishRead = resolve; });
+    const readFile = () => pendingRead;
+    const view = responsiveFiles("# Hello", readFile);
+    fireEvent.click(await view.findByRole("treeitem", { name: /README\.md/ }));
+    fireEvent.click(await view.findByRole("button", { name: "Show files" }));
+    const search = view.getByRole("textbox", { name: "Search files" });
+    fireEvent.change(search, { target: { value: "notes" } });
+    await act(async () => finishRead({ state: "text", path: "README.md", sha256: "sha", sizeBytes: 7, mimeType: "text/markdown", modifiedAtMs: 1, content: "# Hello" }));
+    await view.findByText("Hello");
+    expect(view.getByRole("textbox", { name: "Search files" })).toBe(search);
+    expect((search as HTMLInputElement).value).toBe("notes");
+    expect(view.queryByRole("button", { name: "Open files" })).toBeNull();
+    expect(document.activeElement).toBe(search);
+    fireEvent.click(view.getByRole("button", { name: "Return to document" }));
+    expect((await view.findByRole("button", { name: "Open files" })).getAttribute("title")).toBe("README.md");
+  });
+
+  it("keeps an empty document editable and retains a draft when closing encounters a conflict", async () => {
+    TestResizeObserver.width = 390;
+    const view = responsiveFiles("");
+    fireEvent.click(await view.findByRole("treeitem", { name: /README\.md/ }));
+    const preview = await view.findByRole("textbox", { name: "Editing preview of README.md" });
+    expect(view.getByRole("button", { name: "Open files" })).toBeTruthy();
+    const paragraph = preview.querySelector("p")!;
+    paragraph.textContent = "My draft";
+    fireEvent.input(paragraph);
+    await view.findByText("Unsaved");
+    fireEvent.click(view.getByRole("button", { name: "Show files" }));
+    fireEvent.click(view.getByRole("button", { name: "Return to document" }));
+    expect(view.getByRole("textbox", { name: "Editing preview of README.md" })).toBe(preview);
+    expect(preview.textContent).toContain("My draft");
+    fireEvent.click(view.getByRole("button", { name: "File actions" }));
+    fireEvent.click(view.getByRole("button", { name: "Close file" }));
+    expect((await view.findByRole("alert")).textContent).toContain("Your draft is preserved");
+    expect(view.queryByRole("dialog")).toBeNull();
+    expect(view.getByRole("button", { name: "Open files" }).getAttribute("title")).toBe("README.md");
+    expect(preview.textContent).toContain("My draft");
+  });
+
+  it("shows the preserved draft when closing a background mobile tab encounters a conflict", async () => {
+    TestResizeObserver.width = 390;
+    const view = responsiveFiles("");
+    fireEvent.click(await view.findByRole("treeitem", { name: /README\.md/ }));
+    await view.findByRole("textbox", { name: "Editing preview of README.md" });
+    fireEvent.click(view.getByRole("button", { name: "Show files" }));
+    fireEvent.click(view.getByRole("treeitem", { name: /notes\.md/ }));
+    const preview = await view.findByRole("textbox", { name: "Editing preview of notes.md" });
+    const paragraph = preview.querySelector("p")!;
+    paragraph.textContent = "Background draft";
+    fireEvent.input(paragraph);
+    await view.findByText("Unsaved");
+    fireEvent.click(view.getByRole("button", { name: "Open files" }));
+    fireEvent.click(view.getByRole("button", { name: "Switch to README.md" }));
+    expect(view.getByRole("button", { name: "Open files" }).getAttribute("title")).toBe("README.md");
+    fireEvent.click(view.getByRole("button", { name: "Open files" }));
+    fireEvent.click(view.getByRole("button", { name: "Close notes.md" }));
+    expect((await view.findByRole("alert")).textContent).toContain("Your draft is preserved");
+    expect(view.queryByRole("dialog")).toBeNull();
+    expect(view.getByRole("button", { name: "Open files" }).getAttribute("title")).toBe("notes.md");
+    expect(view.getByRole("textbox", { name: "Editing preview of notes.md" }).textContent).toContain("Background draft");
+  });
+
+  it("clamps the file tree on parent resize, restores preference and preserves panes across the breakpoint", async () => {
+    const view = responsiveFiles();
+    const row = await view.findByRole("treeitem", { name: /README\.md/ });
+    const tree = view.container.querySelector("aside")!;
+    const separator = view.getByRole("separator", { name: "Resize file tree" });
+    fireEvent.keyDown(separator, { key: "End" });
+    expect(tree.parentElement!.style.width).toBe("699px");
+    act(() => TestResizeObserver.resize(739));
+    expect(tree.parentElement!.style.width).toBe("538px");
+    act(() => TestResizeObserver.resize(900));
+    expect(tree.parentElement!.style.width).toBe("699px");
+    fireEvent.click(row);
+    await view.findByRole("textbox", { name: "Editing preview of README.md" });
+    fireEvent.click(view.getByRole("button", { name: "Raw" }));
+    const editor = await view.findByLabelText("Editing README.md");
+    act(() => TestResizeObserver.resize(679));
+    expect(view.getByLabelText("Editing README.md")).toBe(editor);
+    expect(tree.parentElement!.style.display).toBe("none");
+    fireEvent.click(view.getByRole("button", { name: "Show files" }));
+    expect(tree.parentElement!.style.width).toBe("");
+    act(() => TestResizeObserver.resize(680));
+    expect(view.getByLabelText("Editing README.md")).toBe(editor);
+    expect(tree).toBe(view.container.querySelector("aside"));
+    expect(tree.parentElement!.style.width).toBe("479px");
+    fireEvent.click(view.getByRole("button", { name: "Narrow file tree" }));
+    expect(tree.parentElement!.style.width).toBe("439px");
+    fireEvent.click(view.getByRole("button", { name: "Widen file tree" }));
+    expect(tree.parentElement!.style.width).toBe("479px");
+    const restoredSeparator = view.getByRole("separator", { name: "Resize file tree" });
+    fireEvent.keyDown(restoredSeparator, { key: "Home" });
+    expect(tree.parentElement!.style.width).toBe("150px");
+    fireEvent.keyDown(restoredSeparator, { key: "ArrowLeft" });
+    expect(tree.parentElement!.style.width).toBe("190px");
+    fireEvent.keyDown(restoredSeparator, { key: "ArrowRight" });
+    expect(tree.parentElement!.style.width).toBe("150px");
+  });
+
+  it("ends resizing on cancel, capture loss and breakpoint changes, and restores a hidden sidebar", async () => {
+    const view = responsiveFiles();
+    fireEvent.click(await view.findByRole("treeitem", { name: /README\.md/ }));
+    await view.findByRole("textbox", { name: "Editing preview of README.md" });
+    const panel = view.container.querySelector(".bb-files-panel")!;
+    const tree = view.container.querySelector("aside")!;
+    vi.spyOn(panel, "getBoundingClientRect").mockReturnValue({ right: 900 } as DOMRect);
+    let captured = false;
+    const capture = {
+      setPointerCapture: () => { captured = true; },
+      hasPointerCapture: () => captured,
+      releasePointerCapture: () => { captured = false; },
+    };
+    const separator = view.getByRole("separator", { name: "Resize file tree" });
+    Object.assign(separator, capture);
+    fireEvent.pointerDown(separator, { pointerId: 1 });
+    fireEvent.pointerMove(separator, { pointerId: 1, clientX: 500 });
+    expect(tree.parentElement!.style.width).toBe("400px");
+    fireEvent.pointerCancel(separator, { pointerId: 1 });
+    expect(captured).toBe(false);
+    fireEvent.pointerMove(separator, { pointerId: 1, clientX: 200 });
+    expect(tree.parentElement!.style.width).toBe("400px");
+    fireEvent.pointerDown(separator, { pointerId: 1 });
+    captured = false;
+    fireEvent.lostPointerCapture(separator, { pointerId: 1 });
+    fireEvent.pointerMove(separator, { pointerId: 1, clientX: 200 });
+    expect(tree.parentElement!.style.width).toBe("400px");
+    fireEvent.pointerDown(separator, { pointerId: 1 });
+    act(() => TestResizeObserver.resize(679));
+    act(() => TestResizeObserver.resize(900));
+    const restoredSeparator = view.getByRole("separator", { name: "Resize file tree" });
+    Object.assign(restoredSeparator, capture);
+    fireEvent.pointerMove(restoredSeparator, { pointerId: 1, clientX: 200 });
+    expect(tree.parentElement!.style.width).toBe("400px");
+    fireEvent.pointerDown(restoredSeparator, { pointerId: 1 });
+    fireEvent.pointerMove(restoredSeparator, { pointerId: 1, clientX: 850 });
+    expect(tree.parentElement!.style.display).toBe("none");
+    expect(captured).toBe(false);
+    fireEvent.click(view.getByRole("button", { name: "Show sidebar" }));
+    expect(tree.parentElement!.style.display).toBe("");
+    expect(tree.parentElement!.style.width).toBe("400px");
+  });
+
   it("registers one default flush thread action", () => {
     expect(getCapturedPluginApp().threadPanelActions).toEqual([
       expect.objectContaining({
@@ -413,7 +703,7 @@ describe("Files plugin app", () => {
     act(() => first.result.current.setActivePath("README.md"));
 
     await waitFor(() => {
-      expect(window.localStorage.getItem('bb-plugin-files:workspace:["thread-restore",null,null]')).toContain("src/app.tsx");
+      expect(window.localStorage.getItem('bb-plugin-files:workspace:{"kind":"thread","threadId":"thread-restore"}')).toContain("src/app.tsx");
     });
     first.unmount();
 
@@ -428,7 +718,7 @@ describe("Files plugin app", () => {
     });
   });
 
-  it("keeps identical paths separate across trusted host source identities", async () => {
+  it("keeps identical paths separate across host roots", async () => {
     const { useFilesWorkspace } = await import("./src/hooks/useFilesWorkspace");
     const { renderHook } = await import("@testing-library/react");
     setRpcHandlers({
@@ -436,9 +726,8 @@ describe("Files plugin app", () => {
       readFile: (input: unknown) => ({ state: "text", path: (input as { path: string }).path, sha256: "sha", sizeBytes: 1, mimeType: null, modifiedAtMs: null, content: "x" }),
     });
     setBbContext({ projectId: "project-a", threadId: "thread-1" });
-    const first = renderHook(() => useFilesWorkspace());
-    setBbContext({ projectId: "project-b", threadId: "thread-1" });
-    const second = renderHook(() => useFilesWorkspace());
+    const first = renderHook(() => useFilesWorkspace(null, { kind: "host", hostId: "host-a", rootPath: "/repo" }));
+    const second = renderHook(() => useFilesWorkspace(null, { kind: "host", hostId: "host-b", rootPath: "/repo" }));
     await act(async () => { await first.result.current.openPath("README.md"); await second.result.current.openPath("README.md"); });
     expect(first.result.current.tabs[0].id).not.toBe(second.result.current.tabs[0].id);
     expect(first.result.current.tabs).toHaveLength(1);
@@ -462,7 +751,7 @@ describe("Files plugin app", () => {
     expect(readFile).not.toHaveBeenCalled();
   });
 
-  it("re-roots a host file link at the directory that owns it", async () => {
+  it("re-roots a pinned foreign host link without active-thread routing", async () => {
     const resolveOpenerFile = vi.fn(() => ({
       kind: "file",
       scope: { kind: "host", hostId: "host-7", rootPath: "/home/ada" },
@@ -487,14 +776,15 @@ describe("Files plugin app", () => {
       content: "export EDITOR=vi",
     }));
     setRpcHandlers({ resolveOpenerFile, listDirectory, readFile });
-    setBbContext({ projectId: "project-a", threadId: "thread-1" });
+    setBbContext({ projectId: "project-a", threadId: "active-thread" });
+    const navigationCallCount = getOpenThreadPanelCalls();
 
     const view = render(
       <FilesPanel
         path="/home/ada/.zshrc"
         source={{
           kind: "host",
-          threadId: "thread-1",
+          threadId: "foreign-thread",
           environmentId: "env-1",
           projectId: "project-a",
           experimental_hostId: "host-7",
@@ -509,7 +799,7 @@ describe("Files plugin app", () => {
     expect(resolveOpenerFile).toHaveBeenCalledWith({
       source: {
         kind: "host",
-        threadId: "thread-1",
+        threadId: "foreign-thread",
         experimental_hostId: "host-7",
       },
       path: "/home/ada/.zshrc",
@@ -523,7 +813,350 @@ describe("Files plugin app", () => {
       path: ".zshrc",
     });
     expect(view.queryByRole("alert")).toBeNull();
+    expect(getOpenThreadPanelCalls()).toBe(navigationCallCount);
   });
+
+  it("opens a host source when no thread is active", async () => {
+    const resolveOpenerFile = vi.fn(() => ({
+      kind: "file",
+      scope: { kind: "host", hostId: "host-7", rootPath: "/repo" },
+      path: "src/index.ts",
+    }));
+    const listDirectory = vi.fn(() => ({
+      path: "",
+      rootName: "repo",
+      entries: [{ kind: "directory", path: "src", name: "src", score: 0, positions: [] }],
+      annotateAvailable: false,
+      sqlAvailable: false,
+    }));
+    const readFile = vi.fn(() => ({
+      state: "text",
+      path: "src/index.ts",
+      sha256: "sha-1",
+      sizeBytes: 13,
+      mimeType: "text/plain",
+      modifiedAtMs: 1,
+      content: "export const x = 1;",
+    }));
+    setRpcHandlers({ resolveOpenerFile, listDirectory, readFile });
+    setBbContext({ projectId: null, threadId: null });
+
+    const view = render(
+      <FilesPanel
+        path="/repo/src/index.ts"
+        source={{ kind: "host", threadId: null, environmentId: null, projectId: null }}
+        Original={() => null}
+      />,
+    );
+    await waitFor(() => expect(readFile).toHaveBeenCalledWith({
+      scope: { kind: "host", hostId: "host-7", rootPath: "/repo" },
+      path: "src/index.ts",
+    }));
+    expect(view.queryByRole("alert")).toBeNull();
+  });
+
+  it("retains thread-storage ownership for reads and preview links", async () => {
+    const resolveOpenerFile = vi.fn(() => ({
+      kind: "file",
+      scope: { kind: "thread-storage", threadId: "thread-1" },
+      path: "prototypes/pi-subagents-v2.html",
+    }));
+    const listDirectory = vi.fn(() => ({
+      path: "",
+      rootName: "thread-1",
+      entries: [],
+      annotateAvailable: false,
+      sqlAvailable: false,
+    }));
+    const readFile = vi.fn(() => ({
+      state: "text",
+      path: "prototypes/pi-subagents-v2.html",
+      sha256: "sha-1",
+      sizeBytes: 14,
+      mimeType: "text/html",
+      modifiedAtMs: 1,
+      content: "<img src='./asset.png'>",
+    }));
+    setRpcHandlers({ resolveOpenerFile, listDirectory, readFile });
+    setBbContext({ projectId: "other-project", threadId: null });
+
+    render(
+      <FilesPanel
+        path="prototypes/pi-subagents-v2.html"
+        source={{ kind: "thread-storage", threadId: "thread-1", environmentId: "env-1", projectId: null }}
+        Original={() => null}
+      />,
+    );
+    await waitFor(() => expect(readFile).toHaveBeenCalledWith({
+      scope: { kind: "thread-storage", threadId: "thread-1" },
+      path: "prototypes/pi-subagents-v2.html",
+    }));
+    expect(listDirectory).toHaveBeenCalledWith({
+      scope: { kind: "thread-storage", threadId: "thread-1" },
+      path: "prototypes",
+    });
+  });
+
+  it("keeps a foreign workspace opener out of the active thread's Files bus", async () => {
+    const resolveOpenerFile = vi.fn(() => ({
+      kind: "file",
+      scope: { kind: "thread", threadId: "foreign-thread" },
+      path: "src/foreign.ts",
+    }));
+    const listDirectory = vi.fn(() => ({
+      path: "src",
+      entries: [{ kind: "file", path: "src/foreign.ts", name: "foreign.ts", score: 0, positions: [] }],
+    }));
+    const readFile = vi.fn(() => ({
+      state: "text",
+      path: "src/foreign.ts",
+      sha256: "sha-1",
+      sizeBytes: 1,
+      mimeType: "text/plain",
+      modifiedAtMs: 1,
+      content: "x",
+    }));
+    setRpcHandlers({ resolveOpenerFile, listDirectory, readFile });
+    setBbContext({ projectId: "active-project", threadId: "active-thread" });
+    const navigationCalls = getOpenThreadPanelCalls();
+
+    render(
+      <FilesPanel
+        path="src/foreign.ts"
+        source={{ kind: "workspace", threadId: "foreign-thread", environmentId: null, projectId: null }}
+        Original={() => null}
+      />,
+    );
+    await waitFor(() => expect(readFile).toHaveBeenCalledWith({
+      scope: { kind: "thread", threadId: "foreign-thread" },
+      path: "src/foreign.ts",
+    }));
+    expect(resolveOpenerFile).toHaveBeenCalled();
+    expect(getOpenThreadPanelCalls()).toBe(navigationCalls);
+  });
+
+  it("ignores stale host-link resolution after a newer file is requested", async () => {
+    const resolvers = new Map<string, (value: unknown) => void>();
+    const resolveOpenerFile = vi.fn((input: unknown) => new Promise((resolve) => {
+      const path = (input as { path: string }).path;
+      resolvers.set(path, resolve);
+    }));
+    const readFile = vi.fn((input: unknown) => ({
+      state: "text",
+      path: (input as { path: string }).path,
+      sha256: "sha-1",
+      sizeBytes: 1,
+      mimeType: "text/plain",
+      modifiedAtMs: 1,
+      content: "x",
+    }));
+    const listDirectory = vi.fn(() => ({ path: "", entries: [] }));
+    setRpcHandlers({ resolveOpenerFile, listDirectory, readFile });
+    setBbContext({ projectId: null, threadId: null });
+    const source = { kind: "host" as const, threadId: null, environmentId: null, projectId: null };
+    const view = render(<FilesPanel path="/repo/first.ts" source={source} Original={() => null} />);
+    await waitFor(() => expect(resolveOpenerFile).toHaveBeenCalledTimes(1));
+    view.rerender(<FilesPanel path="/repo/second.ts" source={source} Original={() => null} />);
+    await waitFor(() => expect(resolveOpenerFile).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      resolvers.get("/repo/first.ts")?.({
+        kind: "file",
+        scope: { kind: "host", hostId: "host-old", rootPath: "/old" },
+        path: "first.ts",
+      });
+      resolvers.get("/repo/second.ts")?.({
+        kind: "file",
+        scope: { kind: "host", hostId: "host-current", rootPath: "/repo" },
+        path: "second.ts",
+      });
+    });
+    await waitFor(() => expect(readFile).toHaveBeenCalledWith({
+      scope: { kind: "host", hostId: "host-current", rootPath: "/repo" },
+      path: "second.ts",
+    }));
+    expect(readFile).not.toHaveBeenCalledWith({
+      scope: { kind: "host", hostId: "host-old", rootPath: "/old" },
+      path: "first.ts",
+    });
+  });
+
+  it("hides a resolved target while its source changes and preserves same-root drafts", async () => {
+    const resolvers = new Map<string, (value: unknown) => void>();
+    const resolveOpenerFile = vi.fn((input: unknown) => new Promise((resolve) => {
+      const threadId = (input as { source: { threadId: string } }).source.threadId;
+      resolvers.set(threadId, resolve);
+    }));
+    const listDirectory = vi.fn(() => ({
+      path: "",
+      rootName: "repo",
+      entries: [
+        { kind: "file", path: "first.md", name: "first.md", score: 0, positions: [] },
+        { kind: "file", path: "second.md", name: "second.md", score: 0, positions: [] },
+      ],
+      annotateAvailable: false,
+      sqlAvailable: false,
+    }));
+    const readFile = vi.fn((input: unknown) => {
+      const path = (input as { path: string }).path;
+      const content = path === "first.md" ? "# First\n\nOriginal body." : "# Second\n\nSecond body.";
+      return {
+        state: "text",
+        path,
+        sha256: path,
+        sizeBytes: content.length,
+        mimeType: "text/markdown",
+        modifiedAtMs: 1,
+        content,
+      };
+    });
+    setRpcHandlers({ resolveOpenerFile, listDirectory, readFile });
+    setBbContext({ projectId: null, threadId: null });
+    const firstSource = {
+      kind: "host" as const,
+      threadId: "source-first",
+      environmentId: null,
+      projectId: null,
+      experimental_hostId: "host-shared",
+    };
+    const view = render(
+      <FilesPanel path="/repo/first.md" source={firstSource} Original={() => null} />,
+    );
+    await waitFor(() => expect(resolveOpenerFile).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      resolvers.get("source-first")?.({
+        kind: "file",
+        scope: { kind: "host", hostId: "host-shared", rootPath: "/repo" },
+        path: "first.md",
+      });
+    });
+    await waitFor(() => expect(readFile).toHaveBeenCalledWith({
+      scope: { kind: "host", hostId: "host-shared", rootPath: "/repo" },
+      path: "first.md",
+    }));
+    const body = await view.findByText("Original body.");
+    body.textContent = "Edited draft.";
+    fireEvent.input(body);
+    expect(await view.findByText("Unsaved")).toBeTruthy();
+
+    view.rerender(
+      <FilesPanel
+        path="/repo/second.md"
+        source={{ ...firstSource, threadId: "source-second" }}
+        Original={() => null}
+      />,
+    );
+    await waitFor(() => expect(resolveOpenerFile).toHaveBeenCalledTimes(2));
+    expect((await view.findByRole("status")).textContent).toContain("Opening file");
+    expect(view.queryByRole("treeitem", { name: /first\.md/ })).toBeNull();
+    await act(async () => {
+      resolvers.get("source-second")?.({
+        kind: "file",
+        scope: { kind: "host", hostId: "host-shared", rootPath: "/repo" },
+        path: "second.md",
+      });
+    });
+    await waitFor(() => expect(readFile).toHaveBeenCalledWith({
+      scope: { kind: "host", hostId: "host-shared", rootPath: "/repo" },
+      path: "second.md",
+    }));
+    expect(await view.findByRole("textbox", {
+      name: "Editing preview of second.md",
+    })).toBeTruthy();
+
+    fireEvent.click(view.getAllByText("first.md", { selector: "span" })[0]!);
+    const firstPreview = await view.findByRole("textbox", {
+      name: "Editing preview of first.md",
+    });
+    expect(firstPreview.textContent).toContain("Edited draft.");
+  });
+
+  it.each(["success", "failure"] as const)(
+    "ignores the earlier A→B→A %s after the newest A resolves",
+    async (oldOutcome) => {
+      const pending: {
+        threadId: string;
+        resolve(value: unknown): void;
+        reject(reason: unknown): void;
+      }[] = [];
+      const resolveOpenerFile = vi.fn((input: unknown) =>
+        new Promise<unknown>((resolve, reject) => {
+          const threadId = (input as { source: { threadId: string } }).source.threadId;
+          pending.push({ threadId, resolve, reject });
+        }),
+      );
+      const listDirectory = vi.fn(() => ({ path: "", rootName: "repo", entries: [] }));
+      const readFile = vi.fn((input: unknown) => {
+        const path = (input as { path: string }).path;
+        const content = `# ${path}\\n\\nBody.`;
+        return {
+          state: "text",
+          path,
+          sha256: path,
+          sizeBytes: content.length,
+          mimeType: "text/markdown",
+          modifiedAtMs: 1,
+          content,
+        };
+      });
+      setRpcHandlers({ resolveOpenerFile, listDirectory, readFile });
+      setBbContext({ projectId: null, threadId: null });
+      const sourceA = {
+        kind: "host" as const,
+        threadId: "source-a",
+        environmentId: null,
+        projectId: null,
+        experimental_hostId: "host-pinned",
+      };
+      const sourceB = { ...sourceA, threadId: "source-b" };
+      const renderSource = (source: typeof sourceA, path: string) => (
+        <StrictMode>
+          <FilesPanel path={path} source={source} Original={() => null} />
+        </StrictMode>
+      );
+      const view = render(renderSource(sourceA, "/repo/a.md"));
+      await waitFor(() => expect(pending).toHaveLength(1));
+      view.rerender(renderSource(sourceB, "/repo/b.md"));
+      await waitFor(() => expect(pending).toHaveLength(2));
+      view.rerender(renderSource(sourceA, "/repo/a.md"));
+      await waitFor(() => expect(pending).toHaveLength(3));
+
+      await act(async () => {
+        pending[2]!.resolve({
+          kind: "file",
+          scope: { kind: "host", hostId: "host-pinned", rootPath: "/repo" },
+          path: "current.md",
+        });
+      });
+      expect(await view.findByRole("textbox", { name: "Editing preview of current.md" })).toBeTruthy();
+      await act(async () => {
+        pending[1]!.resolve({
+          kind: "file",
+          scope: { kind: "host", hostId: "host-pinned", rootPath: "/b" },
+          path: "stale-b.md",
+        });
+      });
+
+      await act(async () => {
+        if (oldOutcome === "success") {
+          pending[0]!.resolve({
+            kind: "file",
+            scope: { kind: "host", hostId: "host-pinned", rootPath: "/old" },
+            path: "stale-a.md",
+          });
+        } else {
+          pending[0]!.reject(new Error("stale A failed"));
+        }
+      });
+
+      expect(view.getByRole("textbox", { name: "Editing preview of current.md" })).toBeTruthy();
+      expect(view.queryByRole("alert")).toBeNull();
+      expect(readFile).not.toHaveBeenCalledWith({
+        scope: { kind: "host", hostId: "host-pinned", rootPath: "/old" },
+        path: "stale-a.md",
+      });
+    },
+  );
 
   it("refuses a link the server cannot place instead of reading an unrelated file", async () => {
     const resolveOpenerFile = vi.fn(() => ({
@@ -614,6 +1247,74 @@ describe("Files plugin app", () => {
       await hook.result.current.removePath("README.md", false);
     });
     expect(Object.values(handlers).every((handler) => handler.mock.calls.length === 0)).toBe(true);
+  });
+
+  it("migrates the selected legacy tab and isolates ambiguous legacy hosts", async () => {
+    const { useFilesWorkspace } = await import("./src/hooks/useFilesWorkspace");
+    const { renderHook } = await import("@testing-library/react");
+    const source = {
+      kind: "workspace",
+      threadId: "thread-migration",
+      environmentId: "env-1",
+      projectId: "project-1",
+    };
+    const legacyRecord = (path: string) => ({ version: 1, source, path });
+    const activeLegacyId = JSON.stringify([
+      1,
+      source.kind,
+      source.threadId,
+      source.environmentId,
+      source.projectId,
+      "src/second.ts",
+    ]);
+    window.localStorage.setItem(
+      'bb-plugin-files:workspace:{"kind":"thread","threadId":"thread-migration"}',
+      JSON.stringify({
+        version: 2,
+        openFiles: [legacyRecord("src/first.ts"), legacyRecord("src/second.ts")],
+        activeFileId: activeLegacyId,
+      }),
+    );
+    setBbContext({ projectId: "project-1", threadId: "thread-migration" });
+    setRpcHandlers({
+      listDirectory: () => ({ path: "", rootName: "repo", entries: [] }),
+      readFile: (input: unknown) => {
+        const path = (input as { path: string }).path;
+        return { state: "text", path, sha256: path, sizeBytes: 1, mimeType: null, modifiedAtMs: 1, content: path };
+      },
+    });
+
+    const threadHook = renderHook(() =>
+      useFilesWorkspace(null, { kind: "thread", threadId: "thread-migration" }),
+    );
+    expect(threadHook.result.current.tabs.map((tab) => tab.path)).toEqual([
+      "src/first.ts",
+      "src/second.ts",
+    ]);
+    expect(threadHook.result.current.activePath).toBe("src/second.ts");
+
+    const oldHostRecord = {
+      version: 1,
+      source: {
+        kind: "host",
+        threadId: null,
+        environmentId: "env-1",
+        projectId: "/repo",
+      },
+      path: "src/old.ts",
+    };
+    window.localStorage.setItem(
+      'bb-plugin-files:workspace:{"kind":"host","rootPath":"/repo"}',
+      JSON.stringify({
+        version: 2,
+        openFiles: [oldHostRecord],
+        activeFileId: JSON.stringify([1, "host", null, "env-1", "/repo", "src/old.ts"]),
+      }),
+    );
+    const hostHook = renderHook(() =>
+      useFilesWorkspace(null, { kind: "host", rootPath: "/repo" }),
+    );
+    expect(hostHook.result.current.tabs).toEqual([]);
   });
 
   it("does not import legacy thread-only state", async () => {

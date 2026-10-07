@@ -4,12 +4,12 @@ const NARROW_PANEL_WIDTH = 680;
 
 export function useResponsiveLayout() {
   const [node, setNode] = useState<HTMLElement | null>(null);
-  const [isNarrow, setIsNarrow] = useState(false);
+  const [containerWidth, setContainerWidth] = useState(NARROW_PANEL_WIDTH);
   const ref = useCallback((next: HTMLElement | null) => setNode(next), []);
 
   useEffect(() => {
     if (node === null) return;
-    const update = (width: number) => setIsNarrow(width < NARROW_PANEL_WIDTH);
+    const update = (width: number) => setContainerWidth(width);
     update(node.getBoundingClientRect().width);
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
@@ -19,5 +19,10 @@ export function useResponsiveLayout() {
     return () => observer.disconnect();
   }, [node]);
 
-  return { containerRef: ref, containerNode: node, isNarrow };
+  return {
+    containerRef: ref,
+    containerNode: node,
+    containerWidth,
+    isNarrow: containerWidth < NARROW_PANEL_WIDTH,
+  };
 }
