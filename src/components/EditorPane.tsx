@@ -5,6 +5,7 @@ import { CodeEditor } from "./CodeEditor";
 import { ExcalidrawEditor } from "./ExcalidrawEditor";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { MobileFileNavigation } from "./MobileFileNavigation";
+import { ImagePreview } from "./ImagePreview";
 import type { SaveState, TabState } from "../hooks/useFilesWorkspace";
 
 function isMarkdown(path: string): boolean {
@@ -411,17 +412,13 @@ export function EditorPane({
                 onSave={() => onSave(activeTab!.id)}
               />
             ) : isImage ? (
-              <div className="grid h-full place-items-center bg-[var(--canvas)] p-6 checkerboard-bg">
-                {previewSrc ? (
-                  <img 
-                    src={previewSrc}
-                    alt={file.path} 
-                    className="max-h-full max-w-full object-contain drop-shadow-md"
-                  />
-                ) : (
+              previewSrc ? (
+                <ImagePreview key={`${activeTabId}:${previewSrc}`} src={previewSrc} alt={file.path} />
+              ) : (
+                <div className="grid h-full place-items-center bg-[var(--canvas)]">
                   <p className="text-sm text-muted-foreground">Loading image preview…</p>
-                )}
-              </div>
+                </div>
+              )
             ) : file.state === "unsupported" ? (
               <div className="grid h-full place-items-center p-6 text-center bg-background">
                 <div className="max-w-sm">
