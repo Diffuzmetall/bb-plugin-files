@@ -58,7 +58,7 @@ function isSqlPath(path: string): boolean {
 
 export function EditorPane({
   tabs,
-  activePath,
+  activeTabId,
   narrow,
   onTabSelect,
   onTabClose,
@@ -73,37 +73,44 @@ export function EditorPane({
   onOpenInSql,
   showSql,
   onOpenPreferred,
+  onNewNote,
   onShowFiles,
   onToggleSidebar,
   isSidebarOpen,
   getDownloadUrl,
+  noteError,
+  onDismissNoteError,
 }: {
   tabs: TabState[];
-  activePath: string | null;
+  activeTabId: string | null;
   narrow: boolean;
-  onTabSelect(path: string): void;
-  onTabClose(path: string): void;
-  onChange(path: string, value: string): void;
-  onOverwrite(path: string): void;
-  onReload(path: string): void;
-  onSave(path: string): void;
-  onDownload(path: string): void;
-  onOpenInAnnotate(path: string): void;
+  onTabSelect(id: string): void;
+  onTabClose(id: string): void;
+  onChange(id: string, value: string): void;
+  onOverwrite(id: string): void;
+  onReload(id: string): void;
+  onSave(id: string): void;
+  onDownload(id: string): void;
+  onOpenInAnnotate(id: string): void;
   showAnnotate: boolean;
   showOpenPreferred: boolean;
-  onOpenInSql(path: string): void;
+  onOpenInSql(id: string): void;
   showSql: boolean;
-  onOpenPreferred(path: string): void;
+  onOpenPreferred(id: string): void;
+  onNewNote?(): void;
   onShowFiles(): void;
   onToggleSidebar?(): void;
   isSidebarOpen?: boolean;
-  getDownloadUrl(path: string): Promise<string>;
+  getDownloadUrl(id: string): Promise<string>;
+  noteError?: string | null;
+  onDismissNoteError?(): void;
 }) {
   const [mode, setMode] = useState<"preview" | "raw">("raw");
   const [copied, setCopied] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<{ id: string; url: string } | null>(null);
   
-  const activeTab = tabs.find(t => t.path === activePath);
+  const activeTab = tabs.find(t => t.id === activeTabId) ?? null;
+  const activePath = activeTab?.path ?? null;
   const file = activeTab?.file || null;
   const draftText = activeTab?.draftText || "";
   const saveState = activeTab?.saveState || { kind: "saved" };
@@ -115,15 +122,15 @@ export function EditorPane({
   const isExcalidraw =
     file?.state === "text" && /\.excalidraw$/i.test(file.path);
   const isImage = file !== null && file.state === "unsupported" && Boolean(file.mimeType?.startsWith("image/"));
-  const previewSrc = previewUrl && file ? `${previewUrl}${previewUrl.includes("?") ? "&" : "?"}t=${encodeURIComponent(file.sha256)}` : null;
+  const previewSrc = previewUrl?.id === activeTabId && file ? `${previewUrl.url}${previewUrl.url.includes("?") ? "&" : "?"}t=${encodeURIComponent(file.sha256)}` : null;
 
-  useEffect(() => setMode(markdown || isHtml ? "preview" : "raw"), [file?.path, markdown, isHtml]);
+  useEffect(() => setMode(markdown || isHtml ? "preview" : "raw"), [activeTabId, markdown, isHtml]);
 
   useEffect(() => {
     let cancelled = false;
-    if ((isImage || isHtml) && file) {
-      getDownloadUrl(file.path).then((url) => {
-        if (!cancelled) setPreviewUrl(url);
+    if ((isImage || isHtml) && file && activeTab) {
+      getDownloadUrl(activeTab.id).then((url) => {
+        if (!cancelled) setPreviewUrl({ id: activeTab.id, url });
       }).catch(() => {
         if (!cancelled) setPreviewUrl(null);
       });
@@ -131,7 +138,7 @@ export function EditorPane({
       setPreviewUrl(null);
     }
     return () => void (cancelled = true);
-  }, [file?.path, file?.sha256, isImage, isHtml, getDownloadUrl]);
+  }, [activeTab?.id, file?.path, file?.sha256, isImage, isHtml, getDownloadUrl]);
 
   const openPreview = (isHtml && file?.state === "text" ? (
             <Button
@@ -172,7 +179,7 @@ export function EditorPane({
               </Button>
             </div>
           ) : null);
-  const fileActions = (file !== null ? (
+  const fileActions = (file !== null && activeTab !== null ? (
             <>
               {showOpenPreferred ? (
                 <Button
@@ -180,7 +187,7 @@ export function EditorPane({
                   variant="ghost"
                   className="h-6 w-6 text-muted-foreground hover:text-foreground"
                   aria-label="Open with preferred opener"
-                  onClick={() => onOpenPreferred(activePath!)}
+                  onClick={() => onOpenPreferred(activeTab.id)}
                 >
                   <Icon name="ExternalLink" className="h-3.5 w-3.5" />
                 </Button>
@@ -191,7 +198,7 @@ export function EditorPane({
                   variant="ghost"
                   className="h-6 w-6 text-muted-foreground hover:text-foreground"
                   aria-label="Open in SQL"
-                  onClick={() => onOpenInSql(activePath!)}
+                  onClick={() => onOpenInSql(activeTab.id)}
                 >
                   <Icon name="Terminal" className="h-3.5 w-3.5" />
                 </Button>
@@ -202,7 +209,7 @@ export function EditorPane({
                   variant="ghost"
                   className="h-6 w-6 text-muted-foreground hover:text-foreground"
                   aria-label="Open in Annotate"
-                  onClick={() => onOpenInAnnotate(activePath!)}
+                  onClick={() => onOpenInAnnotate(activeTab.id)}
                 >
                   <Icon name="MessageSquare" className="h-3.5 w-3.5" />
                 </Button>
@@ -212,10 +219,21 @@ export function EditorPane({
                 variant="ghost"
                 className="h-6 w-6 text-muted-foreground hover:text-foreground"
                 aria-label="Download file"
-                onClick={() => onDownload(activePath!)}
+                onClick={() => onDownload(activeTab.id)}
               >
                 <Icon name="Download" className="h-3.5 w-3.5" />
               </Button>
+              {onNewNote ? (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                  aria-label="New note"
+                  onClick={onNewNote}
+                >
+                  <Icon name="FileText" className="h-3.5 w-3.5" />
+                </Button>
+              ) : null}
               <Button
                 size="icon"
                 variant="ghost"
@@ -245,7 +263,7 @@ export function EditorPane({
         {narrow ? (
           <MobileFileNavigation
             tabs={tabs}
-            activePath={activePath}
+            activeTabId={activeTabId}
             onTabSelect={onTabSelect}
             onTabClose={onTabClose}
             onShowFiles={onShowFiles}
@@ -257,16 +275,17 @@ export function EditorPane({
         <div className="flex h-8 min-w-[100px] flex-1 items-center overflow-x-auto no-scrollbar">
           <div className="flex h-full shrink-0 flex-nowrap items-center">
             {tabs.map(tab => {
-            const isActive = tab.path === activePath;
+            const isActive = tab.id === activeTabId;
             const tabIsDirty = tab.file?.state === "text" && tab.draftText !== tab.savedText;
             const name = tab.path.split("/").pop() || "";
             return (
               <div
-                key={tab.path}
-                onClick={() => onTabSelect(tab.path)}
+                key={tab.id}
+                onClick={() => onTabSelect(tab.id)}
                 className={`group relative flex h-[30px] max-w-[200px] shrink-0 cursor-pointer items-center gap-1.5 px-2.5 text-xs transition-colors ${
                   isActive ? "bg-background text-foreground" : "bg-muted/20 text-muted-foreground hover:bg-muted/40"
                 }`}
+                title={tab.path}
               >
                 <Icon name={getFileIconForEditor(name) as any} className="h-3.5 w-3.5 opacity-80" />
                 <span className="min-w-0 flex-1 truncate select-none">
@@ -275,7 +294,7 @@ export function EditorPane({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    onTabClose(tab.path);
+                    onTabClose(tab.id);
                   }}
                   className="grid h-4 w-4 shrink-0 place-items-center rounded-sm text-muted-foreground opacity-0 transition-opacity hover:bg-muted-foreground/20 hover:text-foreground group-hover:opacity-100"
                   aria-label="Close file"
@@ -319,10 +338,28 @@ export function EditorPane({
         </div> : null}
       </div>
 
+      {noteError ? (
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-surface-destructive-border bg-surface-destructive px-3 py-2 text-xs text-destructive-text" role="alert">
+          <span>{noteError}</span>
+          {onDismissNoteError ? (
+            <Button size="sm" variant="outline" className="ml-auto h-6 text-xs" onClick={onDismissNoteError}>
+              Dismiss
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+
       {/* MAIN CONTENT AREA */}
       {fileLoading && file === null ? (
         <div className="grid h-full place-items-center text-sm text-muted-foreground" role="status">
           Loading file…
+        </div>
+      ) : file === null && saveState.kind === "error" ? (
+        <div className="flex items-center gap-2 border-b border-surface-destructive-border bg-surface-destructive p-3 text-sm text-destructive-text" role="alert">
+          <span>{saveState.message}</span>
+          <Button size="sm" variant="outline" onClick={() => onReload(activeTab!.id)}>
+            Reload
+          </Button>
         </div>
       ) : file === null ? (
         <div className="grid h-full place-items-center p-6 text-center text-sm text-muted-foreground bg-background">
@@ -330,6 +367,17 @@ export function EditorPane({
             <Icon name="Code" className="mx-auto mb-4 h-16 w-16 stroke-[1px]" aria-hidden />
             <p className="font-medium text-base tracking-tight">BB Files Editor</p>
             <p className="mt-1 text-xs">Select a file from the explorer to begin.</p>
+            {onNewNote ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-3 gap-1.5 text-xs"
+                aria-label="New note"
+                onClick={onNewNote}
+              >
+                <Icon name="FileText" className="h-3.5 w-3.5" /> New note
+              </Button>
+            ) : null}
           </div>
         </div>
       ) : (
@@ -337,17 +385,17 @@ export function EditorPane({
           {saveState.kind === "conflict" ? (
             <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-surface-destructive-border bg-surface-destructive px-3 py-2 text-xs text-destructive-text" role="alert">
               The file changed outside this editor. Your draft is preserved.
-              <Button size="sm" variant="outline" className="ml-auto h-6 text-xs" onClick={() => onReload(activePath!)}>
+              <Button size="sm" variant="outline" className="ml-auto h-6 text-xs" onClick={() => onReload(activeTab!.id)}>
                 Reload
               </Button>
-              <Button size="sm" variant="destructive" className="h-6 text-xs" onClick={() => onOverwrite(activePath!)}>
+              <Button size="sm" variant="destructive" className="h-6 text-xs" onClick={() => onOverwrite(activeTab!.id)}>
                 Overwrite
               </Button>
             </div>
           ) : saveState.kind === "error" ? (
             <div className="flex shrink-0 items-center gap-2 border-b border-surface-destructive-border bg-surface-destructive px-3 py-2 text-xs text-destructive-text" role="alert">
               {saveState.message}
-              <Button size="sm" variant="outline" className="ml-auto h-6 text-xs" onClick={() => onSave(activePath!)}>
+              <Button size="sm" variant="outline" className="ml-auto h-6 text-xs" onClick={() => onSave(activeTab!.id)}>
                 Retry
               </Button>
             </div>
@@ -356,16 +404,17 @@ export function EditorPane({
           <div className="min-h-0 flex-1 overflow-hidden relative">
             {isExcalidraw ? (
               <ExcalidrawEditor
+                key={activeTabId}
                 content={draftText}
                 filePath={file.path}
-                onChange={(value) => onChange(activePath!, value)}
-                onSave={() => onSave(activePath!)}
+                onChange={(value) => onChange(activeTab!.id, value)}
+                onSave={() => onSave(activeTab!.id)}
               />
             ) : isImage ? (
               <div className="grid h-full place-items-center bg-[var(--canvas)] p-6 checkerboard-bg">
-                {previewUrl ? (
+                {previewSrc ? (
                   <img 
-                    src={previewUrl} 
+                    src={previewSrc}
                     alt={file.path} 
                     className="max-h-full max-w-full object-contain drop-shadow-md"
                   />
@@ -389,10 +438,11 @@ export function EditorPane({
               <div className="h-full overflow-hidden bg-background">
                 {markdown ? (
                   <MarkdownEditor
+                    key={activeTabId}
                     filePath={file.path}
                     value={draftText}
-                    onChange={(value) => onChange(activePath!, value)}
-                    onSave={() => onSave(activePath!)}
+                    onChange={(value) => onChange(activeTab!.id, value)}
+                    onSave={() => onSave(activeTab!.id)}
                   />
                 ) : (
                   <iframe 
@@ -405,10 +455,11 @@ export function EditorPane({
               </div>
             ) : (
               <CodeEditor
+                key={activeTabId}
                 filePath={file.path}
                 value={draftText}
-                onChange={(val) => onChange(activePath!, val)}
-                onSave={() => onSave(activePath!)}
+                onChange={(val) => onChange(activeTab!.id, val)}
+                onSave={() => onSave(activeTab!.id)}
               />
             )}
           </div>

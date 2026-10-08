@@ -305,6 +305,7 @@ export function TreePane({
   loading,
   onAction,
   onCreateRoot,
+  onNewNote,
   onOpen,
   onRefresh,
   onUpload,
@@ -331,6 +332,7 @@ export function TreePane({
   loading: boolean;
   onAction(action: FileAction, entry: FileTreeEntry): void;
   onCreateRoot(kind: "file" | "directory"): void;
+  onNewNote?(): void;
   onOpen(path: string): void;
   onRefresh(): void;
   onUpload(directory: string, files: File[]): void;
@@ -411,12 +413,16 @@ export function TreePane({
   const [revealedPath, setRevealedPath] = useState<string | null>(null);
   useEffect(() => {
     if (!reveal || revealedNonceRef.current === reveal.nonce) return;
+    const escaped =
+      typeof CSS !== "undefined" && typeof CSS.escape === "function"
+        ? CSS.escape(reveal.path)
+        : reveal.path.replace(/(["\\])/g, "\\$1");
     const row = listRef.current?.querySelector(
-      `[data-path="${CSS.escape(reveal.path)}"]`,
+      `[data-path="${escaped}"]`,
     );
     if (row === null || row === undefined) return;
     revealedNonceRef.current = reveal.nonce;
-    row.scrollIntoView({ block: "center" });
+    row.scrollIntoView?.({ block: "center" });
     setRevealedPath(reveal.path);
   }, [reveal, visibleEntries]);
   useEffect(() => {
@@ -455,6 +461,17 @@ export function TreePane({
         >
           <Icon name="ArrowUp" className="h-3.5 w-3.5" />
         </Button>
+        {onNewNote ? (
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-[26px] w-[26px]"
+            aria-label="New note"
+            onClick={onNewNote}
+          >
+            <Icon name="FileText" className="h-3.5 w-3.5" />
+          </Button>
+        ) : null}
         <Button
           size="icon"
           variant="ghost"
@@ -538,7 +555,7 @@ export function TreePane({
           </div>
         ) : null}
         {error ? (
-          <div className="m-2 rounded-md border border-surface-destructive-border bg-surface-destructive p-3 text-sm text-destructive-text">
+          <div className="m-2 rounded-md border border-surface-destructive-border bg-surface-destructive p-3 text-sm text-destructive-text" role="alert">
             <p>{error}</p>
             <Button
               className="mt-3"

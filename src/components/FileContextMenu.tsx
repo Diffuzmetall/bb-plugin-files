@@ -12,6 +12,7 @@ import type { FileTreeEntry } from "../hooks/useFilesWorkspace";
 export type FileAction =
   | "create-file"
   | "create-directory"
+  | "create-note"
   | "rename"
   | "duplicate"
   | "delete"
@@ -56,6 +57,9 @@ export function FileContextMenu({
       <ContextMenuContent className="w-56">
         {entry.kind === "directory" ? (
           <>
+            <ContextMenuItem onSelect={() => onAction("create-note", entry)}>
+              <Icon name="FileText" /> New note here
+            </ContextMenuItem>
             <ContextMenuItem onSelect={() => onAction("create-file", entry)}>
               <Icon name="File" /> New file
             </ContextMenuItem>

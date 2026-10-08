@@ -3,7 +3,8 @@ import { useBbContext, useRpc } from "@bb/plugin-sdk/app";
 import type { filesRpcContract } from "../../server";
 import { parentPath } from "../tree-order";
 import type { FileScope } from "../contracts";
-import { fileScopeSchema } from "../file-scope";
+import { fileScopeSchema, sameSource } from "../file-scope";
+export { sameSource } from "../file-scope";
 
 export interface FileTreeEntry {
   kind: "file" | "directory";
@@ -150,12 +151,26 @@ async function uploadFile(
   }
 }
 
-function workspaceFileId(identity: WorkspaceFileIdentity): string {
-  return JSON.stringify([identity.version, identity.scope, identity.path]);
+function canonicalScope(scope: FileScope): FileScope {
+  if (scope.kind === "thread") {
+    return { kind: "thread", threadId: scope.threadId };
+  }
+  if (scope.kind === "thread-storage") {
+    return { kind: "thread-storage", threadId: scope.threadId };
+  }
+  return {
+    kind: "host",
+    ...(scope.hostId !== undefined ? { hostId: scope.hostId } : {}),
+    ...(scope.rootPath !== undefined ? { rootPath: scope.rootPath } : {}),
+  };
+}
+
+export function workspaceFileId(identity: WorkspaceFileIdentity): string {
+  return JSON.stringify([identity.version, canonicalScope(identity.scope), identity.path]);
 }
 
 function storageKey(scope: FileScope): string {
-  return `${WORKSPACE_STORAGE_PREFIX}${JSON.stringify(scope)}`;
+  return `${WORKSPACE_STORAGE_PREFIX}${JSON.stringify(canonicalScope(scope))}`;
 }
 
 function legacyStorageKey(scope: FileScope, projectId: string | null): string {
@@ -166,10 +181,6 @@ function legacyStorageKey(scope: FileScope, projectId: string | null): string {
     return `${WORKSPACE_STORAGE_PREFIX}${JSON.stringify([null, null, scope.rootPath ?? null])}`;
   }
   return `${WORKSPACE_STORAGE_PREFIX}${JSON.stringify([scope.threadId, null, projectId])}`;
-}
-
-function sameSource(left: FileScope, right: FileScope): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function isCanonicalWorkspacePath(path: string): boolean {
@@ -234,9 +245,21 @@ function asRestoredWorkspaceFile(value: unknown): RestoredWorkspaceFile | null {
   if (typeof item.path !== "string" || !isCanonicalWorkspacePath(item.path)) return null;
   if (item.version === 2) {
     const parsedScope = fileScopeSchema.safeParse(item.scope);
-    return parsedScope.success
-      ? { identity: { version: 2, scope: parsedScope.data, path: item.path }, legacyId: null }
-      : null;
+    if (!parsedScope.success) return null;
+    const scopeData = parsedScope.data;
+    if (scopeData.kind === "host" && scopeData.rootPath) {
+      const segments = scopeData.rootPath.split("/");
+      if (
+        scopeData.rootPath.length > MAX_WORKSPACE_PATH_LENGTH ||
+        !scopeData.rootPath.startsWith("/") ||
+        scopeData.rootPath.includes("\\") ||
+        scopeData.rootPath.includes("\0") ||
+        segments.some((segment) => segment === "." || segment === "..")
+      ) {
+        return null;
+      }
+    }
+    return { identity: { version: 2, scope: scopeData, path: item.path }, legacyId: null };
   }
   if (item.version !== 1 || typeof item.source !== "object" || item.source === null) return null;
   const source = item.source as {
@@ -271,6 +294,17 @@ function asRestoredWorkspaceFile(value: unknown): RestoredWorkspaceFile | null {
   };
 }
 
+function storedIdMatches(identity: WorkspaceFileIdentity, storedId: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(storedId);
+    if (!Array.isArray(parsed) || parsed[0] !== 2 || parsed[2] !== identity.path) return false;
+    const storedScope = fileScopeSchema.safeParse(parsed[1]);
+    return storedScope.success && sameSource(storedScope.data, identity.scope);
+  } catch {
+    return false;
+  }
+}
+
 function loadStoredWorkspace(scope: FileScope, legacyProjectId: string | null): StoredWorkspaceState {
   const empty = { version: 2 as const, openFiles: [], activeFileId: null };
   if (typeof window === "undefined") return empty;
@@ -283,10 +317,7 @@ function loadStoredWorkspace(scope: FileScope, legacyProjectId: string | null): 
     if (parsed.version === 2 && Array.isArray(parsed.openFiles)) {
       const restored = parsed.openFiles
         .map(asRestoredWorkspaceFile)
-        .filter(
-          (value): value is RestoredWorkspaceFile =>
-            value !== null && sameSource(value.identity.scope, scope),
-        );
+        .filter((value): value is RestoredWorkspaceFile => value !== null);
       const ids = new Set<string>();
       const unique = restored.filter(({ identity }) => {
         const id = workspaceFileId(identity);
@@ -297,6 +328,7 @@ function loadStoredWorkspace(scope: FileScope, legacyProjectId: string | null): 
           ? unique.find(
               ({ identity, legacyId }) =>
                 workspaceFileId(identity) === parsed.activeFileId ||
+                storedIdMatches(identity, parsed.activeFileId as string) ||
                 legacyId === parsed.activeFileId,
             )
           : undefined;
@@ -442,22 +474,14 @@ export function useFilesWorkspace(
       saveState: { kind: "saved" },
     })),
   );
-  const [activePath, setActivePath] = useState<string | null>(
-    () =>
-      initialWorkspace.openFiles.find(
-        (file) => workspaceFileId(file) === initialWorkspace.activeFileId,
-      )?.path ?? null,
+  const [activeTabId, setActiveTabId] = useState<string | null>(
+    () => initialWorkspace.activeFileId,
   );
 
-  const tabIdForPath = useCallback(
-    (path: string) =>
-      workspaceFileId({ version: 2, scope: workspaceScope, path }),
-    [workspaceScope],
-  );
   const tabsRef = useRef(tabs);
-  const activePathRef = useRef(activePath);
+  const activeTabIdRef = useRef(activeTabId);
   const treeRequestRef = useRef(0);
-  const fileLoadRequestsRef = useRef<Set<string>>(new Set());
+  const fileLoadRequestsRef = useRef<Map<string, { promise: Promise<boolean>; error?: string }>>(new Map());
   const savePromisesRef = useRef<Record<string, Promise<boolean> | undefined>>(
     {},
   );
@@ -466,7 +490,7 @@ export function useFilesWorkspace(
   const dirRequestsRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => void (tabsRef.current = tabs), [tabs]);
-  useEffect(() => void (activePathRef.current = activePath), [activePath]);
+  useEffect(() => void (activeTabIdRef.current = activeTabId), [activeTabId]);
   useEffect(
     () => void (childrenByDirRef.current = childrenByDir),
     [childrenByDir],
@@ -484,65 +508,63 @@ export function useFilesWorkspace(
         scope: tabScope,
         path,
       })),
-      activeFileId: activePath === null ? null : tabIdForPath(activePath),
+      activeFileId: activeTabId,
     });
-  }, [activePath, tabIdForPath, tabs, workspaceScope]);
+  }, [activeTabId, tabs, workspaceScope]);
+
+  // One owner per load generation; the retained request object rejects late completions.
+  const loadFile = useCallback((tab: TabState, force = false): Promise<boolean> => {
+    const previous = fileLoadRequestsRef.current.get(tab.id);
+    if (previous && !force) return previous.promise;
+    const request: { promise: Promise<boolean>; error?: string } = { promise: Promise.resolve(false) };
+    fileLoadRequestsRef.current.set(tab.id, request);
+    request.promise = (async () => {
+      try {
+        const result = await rpc.call("readFile", { scope: tab.scope, path: tab.path });
+        if (fileLoadRequestsRef.current.get(tab.id) !== request) return false;
+        const nextTabs = tabsRef.current.map((current): TabState => current.id !== tab.id ? current : {
+          ...current,
+          file: result,
+          loading: false,
+          draftText: current.draftText !== tab.draftText ? current.draftText : result.state === "text" ? result.content : "",
+          savedText: result.state === "text" ? result.content : "",
+          saveState: { kind: "saved" },
+        });
+        tabsRef.current = nextTabs;
+        setTabs(nextTabs);
+        return true;
+      } catch (error) {
+        if (fileLoadRequestsRef.current.get(tab.id) !== request) return false;
+        request.error = message(error);
+        const nextTabs = tabsRef.current.map((current): TabState => current.id !== tab.id ? current : {
+          ...current,
+          loading: false,
+          saveState: { kind: "error", message: request.error! },
+        });
+        tabsRef.current = nextTabs;
+        setTabs(nextTabs);
+        return false;
+      }
+    })();
+    return request.promise;
+  }, [rpc]);
 
   useEffect(() => {
+    for (const id of fileLoadRequestsRef.current.keys()) {
+      if (!tabs.some((tab) => tab.id === id)) fileLoadRequestsRef.current.delete(id);
+    }
     if (!canRead) return;
     tabs.forEach((tab) => {
-      if (
-        tab.file !== null ||
-        !tab.loading ||
-        fileLoadRequestsRef.current.has(tab.id)
-      )
-        return;
-      const path = tab.path;
-      const id = tab.id;
-      fileLoadRequestsRef.current.add(id);
-      void rpc
-        .call("readFile", { scope, path })
-        .then((result) => {
-          setTabs((curr) =>
-            curr.map((current) => {
-              if (current.id !== id) return current;
-              return {
-                ...current,
-                file: result,
-                loading: false,
-                draftText: result.state === "text" ? result.content : "",
-                savedText: result.state === "text" ? result.content : "",
-                saveState: { kind: "saved" },
-              };
-            }),
-          );
-        })
-        .catch((error) => {
-          setTabs((curr) =>
-            curr.map((current) =>
-              current.id === id
-                ? {
-                    ...current,
-                    loading: false,
-                    saveState: { kind: "error", message: message(error) },
-                  }
-                : current,
-            ),
-          );
-        })
-        .finally(() => {
-          fileLoadRequestsRef.current.delete(id);
-        });
+      if (tab.file === null && tab.loading) void loadFile(tab);
     });
-  }, [canRead, rpc, tabs, scope]);
+  }, [canRead, loadFile, tabs]);
 
   const openInPreferredViewer = useCallback(
-    async (path: string) => {
-      // BB's own preview belongs to a thread tab, so the host root has no
-      // equivalent; the context menu hides the action there instead.
-      if (scope?.kind !== "thread" || !isCanonicalWorkspacePath(path))
+    async (path: string, targetScope?: FileScope) => {
+      const effectiveScope = targetScope ?? scope;
+      if (effectiveScope?.kind !== "thread" || !isCanonicalWorkspacePath(path))
         return false;
-      const result = await rpc.call("openFile", { scope, path });
+      const result = await rpc.call("openFile", { scope: effectiveScope, path });
       return result.delivered > 0;
     },
     [rpc, scope],
@@ -731,21 +753,45 @@ export function useFilesWorkspace(
   // above it, so opening a path inside a collapsed folder still shows up in
   // the tree instead of only in the editor.
   useEffect(() => {
-    if (activePath === null) return;
-    let parent = parentPath(activePath);
+    const currentActiveTab = tabsRef.current.find((t) => t.id === activeTabId);
+    if (!currentActiveTab || !sameSource(currentActiveTab.scope, workspaceScope)) return;
+    let parent = parentPath(currentActiveTab.path);
     while (parent.length > 0) {
       expandDirectory(parent);
       parent = parentPath(parent);
     }
-  }, [activePath, expandDirectory]);
+  }, [activeTabId, expandDirectory, workspaceScope]);
+
+  const findTab = useCallback(
+    (target: string | null): TabState | undefined => {
+      if (target === null) return undefined;
+      return tabsRef.current.find((t) => t.id === target);
+    },
+    [],
+  );
+
+  const commitWrite = useCallback((tabId: string, content: string, result: { sha256: string; sizeBytes: number }) => {
+    // A successful write owns a new snapshot identity, superseding older loads and polls.
+    fileLoadRequestsRef.current.set(tabId, { promise: Promise.resolve(true) });
+    const nextTabs = tabsRef.current.map((current): TabState => current.id !== tabId ? current : {
+      ...current,
+      file: current.file?.state === "text" ? { ...current.file, sha256: result.sha256, sizeBytes: result.sizeBytes } : current.file,
+      savedText: content,
+      loading: false,
+      saveState: { kind: "saved" },
+    });
+    tabsRef.current = nextTabs;
+    setTabs(nextTabs);
+  }, []);
 
   const save = useCallback(
-    async (path: string): Promise<boolean> => {
-      if (!canRead || !isCanonicalWorkspacePath(path)) return false;
-      const existingPromise = savePromisesRef.current[path];
+    async (target: string): Promise<boolean> => {
+      if (!canRead) return false;
+      const tab = findTab(target);
+      if (!tab || !isCanonicalWorkspacePath(tab.path)) return false;
+      const tabId = tab.id;
+      const existingPromise = savePromisesRef.current[tabId];
       if (existingPromise) return existingPromise;
-      const tab = tabsRef.current.find((t) => t.path === path);
-      if (!tab) return false;
 
       if (tab.file?.state !== "text" || tab.draftText === tab.savedText) {
         return tab.saveState.kind !== "conflict";
@@ -757,20 +803,23 @@ export function useFilesWorkspace(
       const pending = (async () => {
         setTabs((curr) =>
           curr.map((t) =>
-            t.path === path ? { ...t, saveState: { kind: "saving" } } : t,
+            t.id === tabId ? { ...t, saveState: { kind: "saving" } } : t,
           ),
         );
+        const currentTab = tabsRef.current.find((t) => t.id === tabId);
+        if (!currentTab) return false;
+        const tabScope = currentTab.scope;
         try {
           const result = await rpc.call("saveFile", {
-            scope,
-            path,
-            content: tab.draftText,
+            scope: tabScope,
+            path: currentTab.path,
+            content: currentTab.draftText,
             expectedSha256: file.sha256,
           });
           if (result.outcome === "conflict") {
             setTabs((curr) =>
               curr.map((t) =>
-                t.path === path
+                t.id === tabId
                   ? {
                       ...t,
                       saveState: {
@@ -783,29 +832,13 @@ export function useFilesWorkspace(
             );
             return false;
           }
-          setTabs((curr) =>
-            curr.map((t) => {
-              if (t.path !== path) return t;
-              return {
-                ...t,
-                file:
-                  t.file?.state === "text"
-                    ? {
-                        ...t.file,
-                        sha256: result.sha256,
-                        sizeBytes: result.sizeBytes,
-                      }
-                    : t.file,
-                savedText: t.draftText,
-                saveState: { kind: "saved" },
-              };
-            }),
-          );
-          return true;
+          commitWrite(tabId, currentTab.draftText, result);
+          // A completed write is not a fully saved tab if newer edits arrived.
+          return tabsRef.current.find((t) => t.id === tabId)?.draftText === currentTab.draftText;
         } catch (error) {
           setTabs((curr) =>
             curr.map((t) =>
-              t.path === path
+              t.id === tabId
                 ? {
                     ...t,
                     saveState: { kind: "error", message: message(error) },
@@ -816,27 +849,30 @@ export function useFilesWorkspace(
           return false;
         }
       })();
-      savePromisesRef.current[path] = pending;
+      savePromisesRef.current[tabId] = pending;
       try {
         return await pending;
       } finally {
-        if (savePromisesRef.current[path] === pending) {
-          delete savePromisesRef.current[path];
+        if (savePromisesRef.current[tabId] === pending) {
+          delete savePromisesRef.current[tabId];
         }
       }
     },
-    [canRead, rpc, scope],
+    [canRead, commitWrite, findTab, rpc],
   );
 
   const openPath = useCallback(
-    async (path: string): Promise<boolean> => {
+    async (path: string, targetScope?: FileScope): Promise<boolean> => {
       if (!canRead || !isCanonicalWorkspacePath(path)) return false;
-      const id = tabIdForPath(path);
+      const effectiveScope = targetScope ?? workspaceScope;
+      if (effectiveScope === null) return false;
+      const identity = { version: 2 as const, scope: effectiveScope, path };
+      const id = workspaceFileId(identity);
       const existingTab = tabsRef.current.find((tab) => tab.id === id);
       if (existingTab) {
-        activePathRef.current = path;
-        setActivePath(path);
-        return true;
+        activeTabIdRef.current = id;
+        setActiveTabId(id);
+        return existingTab.file !== null ? true : loadFile(existingTab, !existingTab.loading);
       }
 
       const evictionCandidate =
@@ -853,7 +889,6 @@ export function useFilesWorkspace(
         return false;
       }
 
-      const identity = { version: 2 as const, scope: workspaceScope, path };
       const newTab: TabState = {
         ...identity,
         id,
@@ -872,65 +907,41 @@ export function useFilesWorkspace(
               ),
               newTab,
             ];
-      activePathRef.current = path;
-      setActivePath(path);
+      activeTabIdRef.current = id;
+      setActiveTabId(id);
       tabsRef.current = nextTabs;
       setTabs(nextTabs);
 
-      try {
-        const result = await rpc.call("readFile", { scope, path });
-        setTabs((curr) =>
-          curr.map((t) => {
-            if (t.path !== path) return t;
-            return {
-              ...t,
-              file: result,
-              loading: false,
-              draftText: result.state === "text" ? result.content : "",
-              savedText: result.state === "text" ? result.content : "",
-              saveState: { kind: "saved" },
-            };
-          }),
-        );
-        return true;
-      } catch (error) {
-        setTabs((curr) =>
-          curr.map((t) => {
-            if (t.id !== id) return t;
-            return {
-              ...t,
-              loading: false,
-              saveState: { kind: "error", message: message(error) },
-            };
-          }),
-        );
-        return false;
-      }
+      return loadFile(newTab, true);
     },
-    [canRead, rpc, tabIdForPath, scope, workspaceScope],
+    [canRead, loadFile, workspaceScope],
   );
 
   const closeFile = useCallback(
-    async (path: string) => {
-      if (!canRead || !isCanonicalWorkspacePath(path)) return false;
-      const tab = tabsRef.current.find((t) => t.path === path);
+    async (target: string) => {
+      if (!canRead) return false;
+      const tab = findTab(target);
+      if (!tab) return false;
+      const tabId = tab.id;
       const isDirty =
-        tab?.file?.state === "text" && tab.draftText !== tab.savedText;
+        tab.file?.state === "text" && tab.draftText !== tab.savedText;
       if (isDirty) {
-        if (!(await save(path))) return false;
+        if (!(await save(tabId))) return false;
+        if (tabsRef.current.find((t) => t.id === tabId)?.draftText !== tab.draftText)
+          return false;
       }
-      setTabs((curr) => {
-        const filtered = curr.filter((t) => t.path !== path);
-        if (activePathRef.current === path) {
-          setActivePath(
-            filtered.length > 0 ? filtered[filtered.length - 1].path : null,
-          );
-        }
-        return filtered;
-      });
+      fileLoadRequestsRef.current.delete(tabId);
+      const filtered = tabsRef.current.filter((t) => t.id !== tabId);
+      tabsRef.current = filtered;
+      setTabs(filtered);
+      if (activeTabIdRef.current === tabId) {
+        const nextActiveId = filtered.length > 0 ? filtered[filtered.length - 1].id : null;
+        activeTabIdRef.current = nextActiveId;
+        setActiveTabId(nextActiveId);
+      }
       return true;
     },
-    [save],
+    [canRead, findTab, save],
   );
 
   useEffect(() => {
@@ -941,70 +952,49 @@ export function useFilesWorkspace(
           t.draftText !== t.savedText &&
           t.saveState.kind !== "conflict",
       )
-      .map((t) => window.setTimeout(() => void save(t.path), 700));
+      .map((t) => window.setTimeout(() => void save(t.id), 700));
     return () => timers.forEach((timer) => window.clearTimeout(timer));
   }, [tabs, save]);
 
   const reloadFile = useCallback(
-    async (path: string) => {
-      if (!canRead || !isCanonicalWorkspacePath(path)) return false;
-      setTabs((curr) =>
-        curr.map((t) => (t.path === path ? { ...t, loading: true } : t)),
-      );
-      try {
-        const result = await rpc.call("readFile", { scope, path });
-        setTabs((curr) =>
-          curr.map((t) => {
-            if (t.path !== path) return t;
-            return {
-              ...t,
-              file: result,
-              loading: false,
-              draftText: result.state === "text" ? result.content : "",
-              savedText: result.state === "text" ? result.content : "",
-              saveState: { kind: "saved" },
-            };
-          }),
-        );
-        return true;
-      } catch (error) {
-        setTabs((curr) =>
-          curr.map((t) =>
-            t.path === path
-              ? {
-                  ...t,
-                  loading: false,
-                  saveState: { kind: "error", message: message(error) },
-                }
-              : t,
-          ),
-        );
-        return false;
-      }
+    async (target: string) => {
+      if (!canRead) return false;
+      const tab = findTab(target);
+      if (!tab || !isCanonicalWorkspacePath(tab.path)) return false;
+      setTabs((curr) => curr.map((t) => t.id === tab.id ? { ...t, loading: true } : t));
+      return loadFile(tab, true);
     },
-    [canRead, rpc, scope],
+    [canRead, findTab, loadFile],
   );
 
   const overwrite = useCallback(
-    async (path: string) => {
-      if (!canRead || !isCanonicalWorkspacePath(path)) return false;
-      const tab = tabsRef.current.find((t) => t.path === path);
-      if (!tab || tab.file?.state !== "text") return false;
+    async (target: string) => {
+      if (!canRead) return false;
+      const tab = findTab(target);
+      if (
+        !tab ||
+        tab.file?.state !== "text" ||
+        !isCanonicalWorkspacePath(tab.path)
+      )
+        return false;
+      const tabId = tab.id;
+      const tabScope = tab.scope;
+      const path = tab.path;
       setTabs((curr) =>
         curr.map((t) =>
-          t.path === path ? { ...t, saveState: { kind: "saving" } } : t,
+          t.id === tabId ? { ...t, saveState: { kind: "saving" } } : t,
         ),
       );
       try {
         const result = await rpc.call("overwriteFile", {
-          scope,
+          scope: tabScope,
           path,
           content: tab.draftText,
         });
         if (result.outcome === "conflict") {
           setTabs((curr) =>
             curr.map((t) =>
-              t.path === path
+              t.id === tabId
                 ? {
                     ...t,
                     saveState: {
@@ -1017,26 +1007,12 @@ export function useFilesWorkspace(
           );
           return false;
         }
-        setTabs((curr) =>
-          curr.map((t) => {
-            if (t.path !== path) return t;
-            return {
-              ...t,
-              file: {
-                ...t.file,
-                sha256: result.sha256,
-                sizeBytes: result.sizeBytes,
-              } as OpenFile,
-              savedText: tab.draftText,
-              saveState: { kind: "saved" },
-            };
-          }),
-        );
+        commitWrite(tabId, tab.draftText, result);
         return true;
       } catch (error) {
         setTabs((curr) =>
           curr.map((t) =>
-            t.path === path
+            t.id === tabId
               ? { ...t, saveState: { kind: "error", message: message(error) } }
               : t,
           ),
@@ -1044,7 +1020,7 @@ export function useFilesWorkspace(
         return false;
       }
     },
-    [canRead, rpc, scope],
+    [canRead, commitWrite, findTab, rpc],
   );
 
   useEffect(() => {
@@ -1054,18 +1030,27 @@ export function useFilesWorkspace(
       const currentTabs = tabsRef.current;
       currentTabs.forEach((tab) => {
         const path = tab.path;
+        const id = tab.id;
+        const tabScope = tab.scope;
+        const captureSha = tab.file?.sha256;
+        const captureLoad = fileLoadRequestsRef.current.get(id);
         if (!tab.file) return;
         void rpc
-          .call("readFile", { scope, path })
+          .call("readFile", { scope: tabScope, path })
           .then((remote) => {
-            const latestTab = tabsRef.current.find((t) => t.path === path);
-            if (!latestTab || latestTab.file?.sha256 === tab.file?.sha256)
-              return;
+            const latestTab = tabsRef.current.find((t) => t.id === id);
+            if (!latestTab || !latestTab.file || fileLoadRequestsRef.current.get(id) !== captureLoad) return;
+
+            // Stale check: if tab was saved/modified locally while readFile was in flight
+            if (latestTab.file.sha256 !== captureSha) return;
+
+            // Remote sha unchanged: nothing to update
+            if (remote.sha256 === latestTab.file.sha256) return;
 
             if (latestTab.draftText === latestTab.savedText) {
               setTabs((curr) =>
                 curr.map((t) => {
-                  if (t.path !== path) return t;
+                  if (t.id !== id) return t;
                   return {
                     ...t,
                     file: remote,
@@ -1077,7 +1062,7 @@ export function useFilesWorkspace(
             } else {
               setTabs((curr) =>
                 curr.map((t) =>
-                  t.path === path
+                  t.id === id
                     ? {
                         ...t,
                         saveState: {
@@ -1094,7 +1079,7 @@ export function useFilesWorkspace(
       });
     }, 10_000);
     return () => window.clearInterval(timer);
-  }, [canRead, query, refreshTree, rpc, scope]);
+  }, [canRead, query, refreshTree, rpc]);
 
   const runMutation = useCallback(
     async (operation: () => Promise<unknown>) => {
@@ -1158,36 +1143,54 @@ export function useFilesWorkspace(
         });
       return runMutation(async () => {
         await rpc.call("movePath", { scope, sourcePath, destinationPath });
-        setTabs((curr) => {
-          const movedTabs = curr.map((t) => {
-            if (t.path !== sourcePath && !t.path.startsWith(`${sourcePath}/`))
-              return t;
-            const movedPath =
-              t.path === sourcePath
-                ? destinationPath
-                : `${destinationPath}${t.path.slice(sourcePath.length)}`;
-            const moved = {
-              version: 2 as const,
-              scope: t.scope,
-              path: movedPath,
-            };
-            return {
-              ...t,
-              ...moved,
-              id: workspaceFileId(moved),
-              file: t.file
-                ? ({ ...t.file, path: movedPath } as OpenFile)
-                : null,
-            };
+        let nextActiveId = activeTabIdRef.current;
+        const currentActive = tabsRef.current.find(
+          (t) => t.id === activeTabIdRef.current,
+        );
+        if (
+          currentActive &&
+          sameSource(currentActive.scope, scope) &&
+          (currentActive.path === sourcePath ||
+            currentActive.path.startsWith(`${sourcePath}/`))
+        ) {
+          const movedActivePath =
+            currentActive.path === sourcePath
+              ? destinationPath
+              : `${destinationPath}${currentActive.path.slice(sourcePath.length)}`;
+          nextActiveId = workspaceFileId({
+            version: 2 as const,
+            scope: currentActive.scope,
+            path: movedActivePath,
           });
-          tabsRef.current = movedTabs;
-          return movedTabs;
+        }
+
+        const movedTabs = tabsRef.current.map((t) => {
+          if (!sameSource(t.scope, scope)) return t;
+          if (t.path !== sourcePath && !t.path.startsWith(`${sourcePath}/`))
+            return t;
+          const movedPath =
+            t.path === sourcePath
+              ? destinationPath
+              : `${destinationPath}${t.path.slice(sourcePath.length)}`;
+          const moved = {
+            version: 2 as const,
+            scope: t.scope,
+            path: movedPath,
+          };
+          return {
+            ...t,
+            ...moved,
+            id: workspaceFileId(moved),
+            file: t.file
+              ? ({ ...t.file, path: movedPath } as OpenFile)
+              : null,
+          };
         });
-        const active = activePathRef.current;
-        if (active === sourcePath || active?.startsWith(`${sourcePath}/`)) {
-          const movedActivePath = `${destinationPath}${active.slice(sourcePath.length)}`;
-          activePathRef.current = movedActivePath;
-          setActivePath(movedActivePath);
+        tabsRef.current = movedTabs;
+        setTabs(movedTabs);
+        if (nextActiveId !== activeTabIdRef.current) {
+          activeTabIdRef.current = nextActiveId;
+          setActiveTabId(nextActiveId);
         }
       });
     },
@@ -1205,17 +1208,21 @@ export function useFilesWorkspace(
         });
       return runMutation(async () => {
         await rpc.call("removePath", { scope, path, recursive });
-        setTabs((curr) => {
-          const filtered = curr.filter(
-            (t) => !(t.path === path || t.path.startsWith(`${path}/`)),
-          );
-          if (!filtered.find((t) => t.path === activePathRef.current)) {
-            setActivePath(
-              filtered.length > 0 ? filtered[filtered.length - 1].path : null,
-            );
-          }
-          return filtered;
-        });
+        const filtered = tabsRef.current.filter(
+          (t) =>
+            !(
+              sameSource(t.scope, scope) &&
+              (t.path === path || t.path.startsWith(`${path}/`))
+            ),
+        );
+        tabsRef.current = filtered;
+        setTabs(filtered);
+        if (!filtered.find((t) => t.id === activeTabIdRef.current)) {
+          const nextActiveId =
+            filtered.length > 0 ? filtered[filtered.length - 1].id : null;
+          activeTabIdRef.current = nextActiveId;
+          setActiveTabId(nextActiveId);
+        }
       });
     },
     [rpc, runMutation, scope],
@@ -1285,22 +1292,30 @@ export function useFilesWorkspace(
   );
 
   const getDownloadUrl = useCallback(
-    async (path: string) => {
-      if (!canRead || !isCanonicalWorkspacePath(path))
+    async (target: string, targetScope?: FileScope) => {
+      if (!canRead)
         throw new Error(
           "This file source is not available in the active workspace.",
         );
-      const result = await rpc.call("getDownloadUrl", { scope, path });
+      const tab = findTab(target);
+      const effectiveScope = targetScope ?? tab?.scope ?? null;
+      const effectivePath = targetScope ? target : tab?.path ?? "";
+      if (effectiveScope === null || !isCanonicalWorkspacePath(effectivePath))
+        throw new Error(
+          "This file source is not available in the active workspace.",
+        );
+      const result = await rpc.call("getDownloadUrl", { scope: effectiveScope, path: effectivePath });
       return result.url;
     },
-    [canRead, rpc, scope],
+    [canRead, findTab, rpc, scope],
   );
 
   const downloadPath = useCallback(
-    async (path: string) => {
-      if (!canRead || !isCanonicalWorkspacePath(path)) return;
+    async (path: string, targetScope: FileScope = workspaceScope) => {
+      if (!canRead) return;
+      if (!isCanonicalWorkspacePath(path)) return;
       try {
-        const url = await getDownloadUrl(path);
+        const url = await getDownloadUrl(path, targetScope);
         const a = document.createElement("a");
         a.href = url;
         a.download = path.split("/").pop() || "download";
@@ -1310,57 +1325,126 @@ export function useFilesWorkspace(
       } catch (error) {
         setTabs((curr) =>
           curr.map((t) =>
-            t.path === path
+            sameSource(t.scope, targetScope) && t.path === path
               ? { ...t, saveState: { kind: "error", message: message(error) } }
               : t,
           ),
         );
       }
     },
-    [canRead, getDownloadUrl],
+    [canRead, getDownloadUrl, workspaceScope],
   );
 
-  const selectPath = useCallback(
-    (path: string | null) => {
+  const downloadFile = useCallback(
+    async (id: string) => {
+      const tab = findTab(id);
+      if (tab) await downloadPath(tab.path, tab.scope);
+    },
+    [downloadPath, findTab],
+  );
+
+  const createNote = useCallback(
+    async (directory?: string) => {
+      if (!canRead || scope === null) {
+        const err = FILE_SOURCE_UNAVAILABLE;
+        setTreeError(err);
+        return {
+          ok: false as const,
+          error: err,
+        };
+      }
+      try {
+        const result = await rpc.call("createNote", {
+          currentScope: scope,
+          ...(directory === undefined ? {} : { directory }),
+        });
+
+        const isCurrentScope = sameSource(result.scope, scope);
+        if (isCurrentScope) {
+          await refreshTree(query);
+          revealPath(result.path);
+        }
+        let preferredDelivered = false;
+        if (result.scope.kind === "thread") {
+          try {
+            preferredDelivered = await openInPreferredViewer(result.path, result.scope);
+          } catch {
+            // Keep the created file usable in Files when another opener fails.
+          }
+        }
+        if (!preferredDelivered && !(await openPath(result.path, result.scope))) {
+          const readError = fileLoadRequestsRef.current.get(workspaceFileId({ version: 2, scope: result.scope, path: result.path }))?.error;
+          const error = `Created ${result.path}, but could not open it in Files.${readError ? ` ${readError}` : ""} Retry opening the existing file; do not create it again.`;
+          setTreeError(error);
+          return { ok: false as const, note: result, openedInPreferred: false, error };
+        }
+        return {
+          ok: true as const,
+          note: result,
+          openedInPreferred: preferredDelivered,
+        };
+      } catch (error) {
+        const errMessage = message(error);
+        setTreeError(errMessage);
+        return { ok: false as const, error: errMessage };
+      }
+    },
+    [
+      canRead,
+      openInPreferredViewer,
+      openPath,
+      query,
+      refreshTree,
+      revealPath,
+      rpc,
+      scope,
+    ],
+  );
+
+  const selectTab = useCallback(
+    (id: string | null) => {
       if (
         !canRead ||
-        (path !== null &&
-          (!isCanonicalWorkspacePath(path) ||
-            !tabsRef.current.some((tab) => tab.path === path)))
+        (id !== null && !tabsRef.current.some((tab) => tab.id === id))
       )
         return;
-      activePathRef.current = path;
-      setActivePath(path);
+      activeTabIdRef.current = id;
+      setActiveTabId(id);
     },
     [canRead],
   );
 
   const setDraftText = useCallback(
-    (path: string, text: string) => {
-      if (
-        !canRead ||
-        !isCanonicalWorkspacePath(path) ||
-        !tabsRef.current.some((tab) => tab.path === path)
-      )
-        return;
+    (target: string, text: string) => {
+      if (!canRead) return;
+      const tab = findTab(target);
+      if (!tab) return;
+      const tabId = tab.id;
       setTabs((curr) =>
-        curr.map((t) => (t.path === path ? { ...t, draftText: text } : t)),
+        curr.map((t) => (t.id === tabId ? { ...t, draftText: text } : t)),
       );
     },
-    [canRead],
+    [canRead, findTab],
   );
 
+  const activeTab = useMemo(
+    () => tabs.find((t) => t.id === activeTabId) ?? null,
+    [tabs, activeTabId],
+  );
   return useMemo(
     () => ({
       tabs,
-      activePath,
+      activeTabId,
+      activeTab,
       annotateAvailable,
       sqlAvailable,
-      setActivePath: selectPath,
+      setActiveTabId: selectTab,
       closeFile,
       createDirectory,
       createFile,
+      createNote,
       downloadPath,
+      downloadFile,
       getDownloadUrl,
       setDraftText,
       duplicatePath,
@@ -1382,20 +1466,24 @@ export function useFilesWorkspace(
       save,
       setQuery,
       treeError,
+      setTreeError,
       treeLoading,
       truncated,
       uploadFiles,
     }),
     [
       tabs,
-      activePath,
+      activeTabId,
+      activeTab,
       annotateAvailable,
       sqlAvailable,
-      selectPath,
+      selectTab,
       closeFile,
       createDirectory,
       createFile,
+      createNote,
       downloadPath,
+      downloadFile,
       getDownloadUrl,
       setDraftText,
       duplicatePath,

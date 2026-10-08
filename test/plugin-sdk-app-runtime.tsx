@@ -116,6 +116,25 @@ export function getOpenThreadPanelCalls() {
   return openThreadPanelCalls;
 }
 
+let settingsState = {
+  values: {} as Record<string, string | number | boolean> | undefined,
+  isLoading: false,
+};
+
+export function setSettingsState(state: {
+  values?: Record<string, string | number | boolean>;
+  isLoading?: boolean;
+}) {
+  settingsState = {
+    values: state.values ?? {},
+    isLoading: state.isLoading ?? false,
+  };
+}
+
+export function useSettings() {
+  return settingsState;
+}
+
 export function RuntimeProvider({ children }: { children: ReactNode }) {
   return children;
 }

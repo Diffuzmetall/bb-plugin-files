@@ -1,7 +1,7 @@
 import { defineRpcContract } from "@bb/plugin-sdk";
 import { z } from "zod";
 import { fileScopeSchema } from "./file-scope";
-export { fileScopeSchema } from "./file-scope";
+export { fileScopeSchema, sameSource } from "./file-scope";
 export type { FileScope, ResolvedFileTarget } from "./file-scope";
 
 const threadIdSchema = z.string().trim().min(1);
@@ -88,6 +88,32 @@ const duplicateResultSchema = z.discriminatedUnion("outcome", [
     })
     .strict(),
 ]);
+
+export const createNoteRequestSchema = z
+  .object({
+    /** The active workspace scope where the user initiated the action. */
+    currentScope: fileScopeSchema.optional(),
+    /** Explicit directory override (e.g. from directory context menu "New note here"). */
+    directory: z.string().optional(),
+    /** Optional explicit destination override (path or project ID). */
+    destination: z.string().optional(),
+    /** Optional explicit host override. */
+    hostId: z.string().trim().min(1).optional(),
+  })
+  .strict();
+
+export const createNoteResultSchema = z
+  .object({
+    scope: fileScopeSchema,
+    path: z.string().min(1),
+    name: z.string().min(1),
+    absolutePath: z.string().min(1),
+    sha256: z.string().min(1),
+  })
+  .strict();
+
+export type CreateNoteRequest = z.infer<typeof createNoteRequestSchema>;
+export type CreateNoteResult = z.infer<typeof createNoteResultSchema>;
 
 export const filesRpcContract = defineRpcContract({
   listTree: {
@@ -241,6 +267,10 @@ export const filesRpcContract = defineRpcContract({
       .object({ scope: fileScopeSchema, path: targetPathSchema })
       .strict(),
     output: z.object({ url: z.string().min(1) }).strict(),
+  },
+  createNote: {
+    input: createNoteRequestSchema,
+    output: createNoteResultSchema,
   },
 });
 

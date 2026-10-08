@@ -23,10 +23,12 @@ import { OperationDialog, type OperationRequest } from "./OperationDialog";
 import { TreePane } from "./TreePane";
 import {
   FILE_SOURCE_UNAVAILABLE,
+  sameSource,
   useFilesWorkspace,
   type FileTreeEntry,
   type FilesRootScope,
 } from "../hooks/useFilesWorkspace";
+import type { FileScope } from "../file-scope";
 import { useResponsiveLayout } from "../hooks/useResponsiveLayout";
 import { publishFilesOpen, subscribeFilesOpen } from "../files-open-bus";
 import type { filesRpcContract } from "../../server";
@@ -102,6 +104,13 @@ function isWorkspaceFileLink(
   path: string,
 ): boolean {
   return source.kind === "workspace" && !path.startsWith("/");
+}
+
+function isEditableElement(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const tag = target.tagName.toLowerCase();
+  return tag === "input" || tag === "textarea" || tag === "select";
 }
 
 export function FilesPanel(props: FilesPanelProps) {
@@ -360,6 +369,21 @@ function FilesPanelContent({
 }) {
   const context = useBbContext();
   const workspace = useFilesWorkspace(initialPath, rootScope);
+  const workspaceScope: FileScope =
+    typeof rootScope === "string"
+      ? rootScope === "host"
+        ? { kind: "host" }
+        : context.threadId === null
+          ? { kind: "thread", threadId: "" }
+          : { kind: "thread", threadId: context.threadId }
+      : rootScope;
+  const activeTab =
+    workspace.tabs.find((t) => t.id === workspace.activeTabId) ?? null;
+  const isCurrentScopeActive = activeTab
+    ? sameSource(activeTab.scope, workspaceScope)
+    : false;
+  const treeSelectedPath = isCurrentScopeActive ? activeTab!.path : null;
+
   const threadId =
     typeof rootScope === "string"
       ? rootScope === "thread"
@@ -383,16 +407,16 @@ function FilesPanelContent({
       }),
     [threadId, workspace.openPath],
   );
-  // Opening a file in BB's own preview needs a thread tab, so the global root
-  // keeps that action out of its menus.
-  const showOpenPreferred =
-    rootScope === "thread" ||
-    (typeof rootScope !== "string" && rootScope.kind === "thread");
+  // Opening a file in BB's own preview needs a thread tab, so foreign host
+  // or host roots keep that action out of their menus.
+  const showAnnotate = isCurrentScopeActive && workspace.annotateAvailable;
+  const showSql = isCurrentScopeActive && workspace.sqlAvailable;
+  const showOpenPreferred = activeTab ? activeTab.scope.kind === "thread" : false;
   const { containerRef, containerNode, containerWidth, isNarrow } = useResponsiveLayout();
   const [showingFiles, setShowingFiles] = useState(false);
-  const filesVisible = isNarrow && (showingFiles || workspace.activePath === null);
+  const filesVisible = isNarrow && (showingFiles || workspace.activeTabId === null);
 
-  useEffect(() => setShowingFiles(false), [workspace.activePath, isNarrow]);
+  useEffect(() => setShowingFiles(false), [workspace.activeTabId, isNarrow]);
   useEffect(() => {
     if (!isNarrow) return;
     containerNode?.querySelector<HTMLInputElement | HTMLButtonElement>(
@@ -413,6 +437,51 @@ function FilesPanelContent({
   const [sidebarWidth, setSidebarWidth] = useState(260);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const isResizing = useRef(false);
+  const creatingNoteRef = useRef(false);
+  const [noteError, setNoteError] = useState<string | null>(null);
+
+  const handleCreateNote = async (directory?: string) => {
+    if (creatingNoteRef.current) return;
+    creatingNoteRef.current = true;
+    setNoteError(null);
+    try {
+      const result = await workspace.createNote(directory);
+      if (result.ok) {
+        setNoteError(null);
+        if (isNarrow && !result.openedInPreferred) {
+          setShowingFiles(false);
+        }
+      } else {
+        setNoteError(result.error);
+      }
+    } finally {
+      creatingNoteRef.current = false;
+    }
+  };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        event.altKey &&
+        event.key.toLowerCase() === "n"
+      ) {
+        if (isEditableElement(event.target)) return;
+        const panel = containerNode;
+        if (!panel) return;
+        const inPanel =
+          panel.contains(event.target as Node) ||
+          panel.contains(document.activeElement);
+        if (!inPanel) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+        void handleCreateNote();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [containerNode, isNarrow]);
   // The overlapping 11px handle with -5px margins consumes 1px of layout.
   const minSidebarWidth = 150;
   const minEditorWidth = 200;
@@ -463,8 +532,14 @@ function FilesPanelContent({
     });
   };
 
-  const openInPreferred = (path: string) =>
-    void workspace.openInPreferredViewer(path);
+  const openInPreferred = (idOrPath: string) => {
+    const tab = workspace.tabs.find((t) => t.id === idOrPath);
+    if (tab) {
+      void workspace.openInPreferredViewer(tab.path, tab.scope);
+    } else {
+      void workspace.openInPreferredViewer(idOrPath);
+    }
+  };
 
   const chooseUpload = (directory: string) => {
     if (uploadPendingRef.current) return;
@@ -532,6 +607,10 @@ function FilesPanelContent({
       );
       return;
     }
+    if (action === "create-note") {
+      void handleCreateNote(entry.path);
+      return;
+    }
     setOperation({
       kind: action,
       sourcePath: entry.path,
@@ -543,17 +622,18 @@ function FilesPanelContent({
   const tree = (
     <TreePane
       entries={workspace.entries}
-      error={workspace.treeError}
+      error={workspace.treeError || noteError}
       expandedDirs={workspace.expandedDirs}
       loading={workspace.treeLoading}
       onAction={handleAction}
       onCreateRoot={(kind) => requestCreate(kind)}
+      onNewNote={() => void handleCreateNote()}
       onOpen={(path) => {
-        if (path === workspace.activePath) setShowingFiles(false);
+        if (path === treeSelectedPath) setShowingFiles(false);
         void workspace.openPath(path);
       }}
       narrow={isNarrow}
-      onReturnToDocument={workspace.activePath === null ? undefined : () => setShowingFiles(false)}
+      onReturnToDocument={workspace.activeTabId === null ? undefined : () => setShowingFiles(false)}
       onResizeSidebar={isNarrow ? undefined : (delta) => resizeSidebar(effectiveSidebarWidth + delta)}
       onRefresh={() => void workspace.refreshTree()}
       onUpload={(directory, files) => void uploadFiles(directory, files)}
@@ -563,7 +643,7 @@ function FilesPanelContent({
       reveal={workspace.reveal}
       rootName={workspace.rootName}
       searchStatus={workspace.searchStatus}
-      selectedPath={workspace.activePath}
+      selectedPath={treeSelectedPath}
       setQuery={workspace.setQuery}
       showAnnotate={workspace.annotateAvailable}
       showOpenPreferred={showOpenPreferred}
@@ -575,27 +655,33 @@ function FilesPanelContent({
   const editor = (
     <EditorPane
       tabs={workspace.tabs}
-      activePath={workspace.activePath}
+      activeTabId={workspace.activeTabId}
       narrow={isNarrow}
-      onTabSelect={workspace.setActivePath}
-      onTabClose={async (path) => {
-        if (!(await workspace.closeFile(path))) workspace.setActivePath(path);
+      onTabSelect={workspace.setActiveTabId}
+      onTabClose={async (id) => {
+        if (!(await workspace.closeFile(id))) workspace.setActiveTabId(id);
       }}
       onChange={workspace.setDraftText}
-      onOverwrite={(path) => void workspace.overwrite(path)}
-      onReload={(path) => void workspace.reloadFile(path)}
-      onSave={(path) => void workspace.save(path)}
-      onDownload={(path) => void workspace.downloadPath(path)}
+      onOverwrite={(id) => void workspace.overwrite(id)}
+      onReload={(id) => void workspace.reloadFile(id)}
+      onSave={(id) => void workspace.save(id)}
+      onDownload={(id) => void workspace.downloadFile(id)}
       onOpenInAnnotate={openInPreferred}
-      showAnnotate={workspace.annotateAvailable}
+      showAnnotate={showAnnotate}
       showOpenPreferred={showOpenPreferred}
       onOpenInSql={openInPreferred}
-      showSql={workspace.sqlAvailable}
+      showSql={showSql}
       onOpenPreferred={openInPreferred}
+      onNewNote={() => void handleCreateNote()}
       onShowFiles={() => setShowingFiles(true)}
       onToggleSidebar={() => setIsSidebarOpen((prev) => !prev)}
       isSidebarOpen={isSidebarOpen}
       getDownloadUrl={workspace.getDownloadUrl}
+      noteError={noteError || workspace.treeError}
+      onDismissNoteError={() => {
+        setNoteError(null);
+        workspace.setTreeError(null);
+      }}
     />
   );
 

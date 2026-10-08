@@ -51,6 +51,8 @@ We did the source-link checks with BB `0.45.0`. We did not check this new flow o
 - directly editable WYSIWYG Markdown **Preview**, exact-source **Raw** mode, **Image Previews**, and HTML previews in an inline iframe or separate browser tab;
 - embedded Excalidraw editing for `.excalidraw` scenes, including theme synchronization and safe external links;
 - 700 ms autosave and Cmd/Ctrl+S;
+- **Quick Markdown notes**: one-tap **New note** button in the tree and editor toolbars, directory context-menu **New note here**, and panel-scoped `Mod+Alt+N` shortcut. Creates unique `Untitled.md` (or `Untitled 1.md`, etc.) and immediately opens it for editing;
+- **Configurable note destination**: `defaultNotesDestination` accepts a project ID (`proj_...` or `proj_.../subfolder`), absolute path (`/path/to/notes`), exact project name with optional subfolder (`notes-project/daily`), or workspace-relative folder (`notes`). Prefer project IDs when names are ambiguous. If a name matches a project with no usable directory source, creation fails rather than falling back to another workspace. Empty uses the active workspace root. Optional `defaultNotesHostId` selects the host for a project or absolute path; otherwise the project source or active workspace host is used. This can route notes to another repository without changing the workspace shown in Files.
 - SHA-based compare-and-swap with explicit Reload/Overwrite conflict handling;
 - 10-second tree/file external-change polling;
 - create, rename (safely preserves unsaved drafts), duplicate, recursive delete, copy file content, copy relative path, and **download** actions;

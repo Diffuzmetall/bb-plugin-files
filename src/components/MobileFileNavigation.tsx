@@ -13,12 +13,12 @@ function folderName(path: string) {
 }
 
 export function MobileFileNavigation({
-  tabs, activePath, onTabSelect, onTabClose, onShowFiles, modes, status, actions,
+  tabs, activeTabId, onTabSelect, onTabClose, onShowFiles, modes, status, actions,
 }: {
   tabs: TabState[];
-  activePath: string | null;
-  onTabSelect(path: string): void;
-  onTabClose(path: string): void;
+  activeTabId: string | null;
+  onTabSelect(id: string): void;
+  onTabClose(id: string): void;
   onShowFiles(): void;
   modes: ReactNode;
   status: ReactNode;
@@ -30,6 +30,8 @@ export function MobileFileNavigation({
   const dialog = useRef<HTMLDialogElement>(null);
   const trigger = useRef<HTMLButtonElement | null>(null);
   const titleId = useId();
+  const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
+  const activePath = activeTab?.path ?? null;
   const name = fileName(activePath || "");
   const dot = name.lastIndexOf(".");
   const extension = dot > 0 ? name.slice(dot) : "";
@@ -96,10 +98,10 @@ export function MobileFileNavigation({
     trigger.current?.focus({ preventScroll: true });
   }
 
-  function closeTab(path: string) {
+  function closeTab(id: string) {
     // Expose the existing conflict/error UI if saving prevents the close.
     dismiss();
-    onTabClose(path);
+    onTabClose(id);
   }
 
   return (
@@ -141,15 +143,16 @@ export function MobileFileNavigation({
             </div>
             <div className="bb-files-mobile-open-list">
               {filteredTabs.map((tab) => {
+                const isActive = tab.id === activeTabId;
                 const dirty = tab.file?.state === "text" && tab.draftText !== tab.savedText;
                 return (
-                  <div key={tab.path} className="bb-files-mobile-open-row" data-active={tab.path === activePath}>
-                    <button type="button" aria-label={`Switch to ${tab.path}`} aria-current={tab.path === activePath ? "true" : undefined} onClick={() => { dismiss(); onTabSelect(tab.path); }}>
+                  <div key={tab.id} className="bb-files-mobile-open-row" data-active={isActive}>
+                    <button type="button" aria-label={`Switch to ${tab.path}`} aria-current={isActive ? "true" : undefined} onClick={() => { dismiss(); onTabSelect(tab.id); }}>
                       <Icon name="FileText" className="h-4 w-4 shrink-0" aria-hidden />
                       <span className="bb-files-mobile-open-name"><span>{fileName(tab.path)}{dirty ? " •" : ""}</span><span>{folderName(tab.path)}</span></span>
-                      {tab.path === activePath ? <Icon name="Check" className="h-4 w-4 shrink-0" aria-hidden /> : null}
+                      {isActive ? <Icon name="Check" className="h-4 w-4 shrink-0" aria-hidden /> : null}
                     </button>
-                    <Button variant="ghost" size="icon" aria-label={`Close ${tab.path}`} onClick={() => closeTab(tab.path)}><Icon name="X" className="h-4 w-4" aria-hidden /></Button>
+                    <Button variant="ghost" size="icon" aria-label={`Close ${tab.path}`} onClick={() => closeTab(tab.id)}><Icon name="X" className="h-4 w-4" aria-hidden /></Button>
                   </div>
                 );
               })}
@@ -162,7 +165,7 @@ export function MobileFileNavigation({
             if (event.target instanceof Element && event.target.closest('button:not(:disabled), a[href]:not([aria-disabled="true"])')) dismiss();
           }}>
             {actions}
-            <Button variant="ghost" className="bb-files-mobile-close" aria-label="Close file" disabled={activePath === null} onClick={() => { if (activePath !== null) closeTab(activePath); }}><Icon name="X" className="h-4 w-4" aria-hidden /><span>Close this file</span></Button>
+            <Button variant="ghost" className="bb-files-mobile-close" aria-label="Close file" disabled={activeTab === null} onClick={() => { if (activeTab !== null) closeTab(activeTab.id); }}><Icon name="X" className="h-4 w-4" aria-hidden /><span>Close this file</span></Button>
           </div>
         )}
       </dialog>

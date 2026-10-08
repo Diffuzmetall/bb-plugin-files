@@ -700,7 +700,7 @@ describe("Files plugin app", () => {
       await first.result.current.openPath("README.md");
       await first.result.current.openPath("src/app.tsx");
     });
-    act(() => first.result.current.setActivePath("README.md"));
+    act(() => first.result.current.setActiveTabId(first.result.current.tabs.find((tab) => tab.path === "README.md")!.id));
 
     await waitFor(() => {
       expect(window.localStorage.getItem('bb-plugin-files:workspace:{"kind":"thread","threadId":"thread-restore"}')).toContain("src/app.tsx");
@@ -712,7 +712,7 @@ describe("Files plugin app", () => {
       "README.md",
       "src/app.tsx",
     ]);
-    expect(second.result.current.activePath).toBe("README.md");
+    expect(second.result.current.activeTab?.path).toBe("README.md");
     await waitFor(() => {
       expect(second.result.current.tabs.every((tab) => tab.file !== null)).toBe(true);
     });
@@ -1291,7 +1291,7 @@ describe("Files plugin app", () => {
       "src/first.ts",
       "src/second.ts",
     ]);
-    expect(threadHook.result.current.activePath).toBe("src/second.ts");
+    expect(threadHook.result.current.activeTab?.path).toBe("src/second.ts");
 
     const oldHostRecord = {
       version: 1,
@@ -1381,7 +1381,7 @@ describe("Files plugin app", () => {
     expect(hook.result.current.tabs).toHaveLength(20);
     expect(hook.result.current.tabs.map((tab) => tab.path)).not.toContain("src/0.ts");
     expect(hook.result.current.tabs.map((tab) => tab.path)).toContain("src/20.ts");
-    expect(hook.result.current.activePath).toBe("src/20.ts");
+    expect(hook.result.current.activeTab?.path).toBe("src/20.ts");
   });
 
   it("does not evict the oldest dirty tab", async () => {
@@ -1396,7 +1396,7 @@ describe("Files plugin app", () => {
       for (let index = 0; index < 20; index += 1) await hook.result.current.openPath(`src/${index}.ts`);
     });
     await waitFor(() => expect(hook.result.current.tabs.every((tab) => !tab.loading)).toBe(true));
-    act(() => hook.result.current.setDraftText("src/0.ts", "dirty"));
+    act(() => hook.result.current.setDraftText(hook.result.current.tabs[0].id, "dirty"));
     await act(async () => expect(await hook.result.current.openPath("src/requested.ts")).toBe(true));
     expect(hook.result.current.tabs.map((tab) => tab.path)).toContain("src/0.ts");
     expect(hook.result.current.tabs.map((tab) => tab.path)).not.toContain("src/1.ts");
@@ -1416,8 +1416,8 @@ describe("Files plugin app", () => {
       for (let index = 0; index < 20; index += 1) await hook.result.current.openPath(`src/${index}.ts`);
     });
     await waitFor(() => expect(hook.result.current.tabs.every((tab) => !tab.loading)).toBe(true));
-    act(() => hook.result.current.setDraftText("src/0.ts", "dirty"));
-    await act(async () => expect(await hook.result.current.save("src/0.ts")).toBe(false));
+    act(() => hook.result.current.setDraftText(hook.result.current.tabs[0].id, "dirty"));
+    await act(async () => expect(await hook.result.current.save(hook.result.current.tabs[0].id)).toBe(false));
     await act(async () => expect(await hook.result.current.openPath("src/requested.ts")).toBe(true));
     expect(hook.result.current.tabs.find((tab) => tab.path === "src/0.ts")?.saveState.kind).toBe("conflict");
     expect(hook.result.current.tabs.map((tab) => tab.path)).not.toContain("src/1.ts");
@@ -1436,7 +1436,7 @@ describe("Files plugin app", () => {
     });
     await waitFor(() => expect(hook.result.current.tabs.every((tab) => !tab.loading)).toBe(true));
     act(() => {
-      for (let index = 0; index < 20; index += 1) hook.result.current.setDraftText(`src/${index}.ts`, "dirty");
+      for (let index = 0; index < 20; index += 1) hook.result.current.setDraftText(hook.result.current.tabs[index].id, "dirty");
     });
     await act(async () => expect(await hook.result.current.openPath("src/requested.ts")).toBe(false));
     expect(hook.result.current.tabs).toHaveLength(20);
@@ -1462,7 +1462,7 @@ describe("Files plugin app", () => {
       await hook.result.current.movePath("src", "lib");
     });
     expect(hook.result.current.tabs.map((tab) => tab.path)).toEqual(["lib/a.ts", "lib/nested/b.ts"]);
-    expect(hook.result.current.activePath).toBe("lib/nested/b.ts");
+    expect(hook.result.current.activeTab?.path).toBe("lib/nested/b.ts");
   });
 
   it("preserves a dirty draft and reports a CAS conflict", async () => {
@@ -1488,9 +1488,9 @@ describe("Files plugin app", () => {
     await act(async () => {
       await hook.result.current.openPath("README.md");
     });
-    act(() => hook.result.current.setDraftText("README.md", "my draft"));
+    act(() => hook.result.current.setDraftText(hook.result.current.tabs[0].id, "my draft"));
     await act(async () => {
-      expect(await hook.result.current.save("README.md")).toBe(false);
+      expect(await hook.result.current.save(hook.result.current.tabs[0].id)).toBe(false);
     });
 
     await waitFor(() => {
@@ -1500,7 +1500,7 @@ describe("Files plugin app", () => {
       });
     });
     expect(hook.result.current.tabs.find(t => t.path === "README.md")?.draftText).toBe("my draft");
-    expect(hook.result.current.activePath).toBe("README.md");
+    expect(hook.result.current.activeTab?.path).toBe("README.md");
   });
 
   it("lazily loads a directory's children on expand and drops them on collapse", async () => {

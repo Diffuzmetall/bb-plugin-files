@@ -1,5 +1,6 @@
 import type { BbPluginApi } from "@bb/plugin-sdk";
 import { posix } from "node:path";
+import type { CreateNoteRequest } from "./contracts";
 import {
   hostTargetForAbsolutePath,
   resolveFileRoot,
@@ -184,7 +185,172 @@ function fileMetadata(
   };
 }
 
-export function createFileService(bb: BbPluginApi) {
+export interface NotesSettingsHandle {
+  get(): Promise<{
+    defaultNotesDestination?: string;
+    defaultNotesHostId?: string;
+  }>;
+}
+
+interface ResolvedNotesDestination {
+  scope: FileScope;
+  directory: string;
+}
+
+async function resolveNotesDestination(
+  bb: BbPluginApi,
+  input: CreateNoteRequest,
+  settings?: NotesSettingsHandle,
+): Promise<ResolvedNotesDestination> {
+  if (input.directory !== undefined) {
+    const parsed = parseRelativePath(input.directory, { allowEmpty: true });
+    return {
+      scope: input.currentScope ?? { kind: "host" },
+      directory: parsed.normalized,
+    };
+  }
+
+  let rawDestination = (input.destination ?? "").trim();
+  let rawHostId = (input.hostId ?? "").trim() || undefined;
+
+  if (rawDestination.length === 0 && settings !== undefined) {
+    try {
+      const stored = await settings.get();
+      rawDestination = (stored.defaultNotesDestination ?? "").trim();
+      if (rawHostId === undefined) {
+        rawHostId = (stored.defaultNotesHostId ?? "").trim() || undefined;
+      }
+    } catch {
+      // Treat unreadable or missing settings as empty fallback
+    }
+  }
+
+  if (rawDestination.length === 0) {
+    return {
+      scope: input.currentScope ?? { kind: "host" },
+      directory: "",
+    };
+  }
+
+  if (rawDestination.startsWith("proj_")) {
+    const slashIndex = rawDestination.indexOf("/");
+    const projectId = slashIndex === -1 ? rawDestination : rawDestination.slice(0, slashIndex);
+    const subfolder = slashIndex === -1 ? "" : rawDestination.slice(slashIndex + 1);
+
+    const project = await bb.sdk.projects.get({ projectId });
+    const source = project.sources?.find((s) => s.isDefault) ?? project.sources?.[0];
+    if (!source || !source.path) {
+      throw new Error(`Configured notes project ${projectId} has no valid directory source.`);
+    }
+
+    const hostId = rawHostId ?? source.hostId;
+    const rootPath = posix.normalize(source.path);
+    const directory = subfolder.length > 0
+      ? parseRelativePath(subfolder, { allowEmpty: true }).normalized
+      : "";
+
+    return {
+      scope: hostId ? { kind: "host", hostId, rootPath } : { kind: "host", rootPath },
+      directory,
+    };
+  }
+
+  if (rawDestination.startsWith("/")) {
+    if (rawDestination.includes("\0")) {
+      throw new Error("Path must not contain NUL bytes.");
+    }
+    const normalizedTarget = posix.normalize(rawDestination);
+    let hostId = rawHostId;
+    if (hostId === undefined && input.currentScope !== undefined) {
+      hostId = (await resolveFileRoot(bb.sdk, input.currentScope)).hostId;
+      if (input.currentScope.kind !== "host" && !hostId) {
+        throw new Error("Cannot resolve the notes destination's owning host; configure a notes host explicitly.");
+      }
+    }
+
+    let rootPath = normalizedTarget;
+    try {
+      const projects = await bb.sdk.projects.list();
+      const projectList = Array.isArray(projects) ? projects : [];
+      const roots = projectList.flatMap((project) => project.sources ?? [])
+        .filter((source) => (source.hostId ?? undefined) === hostId && source.path?.startsWith("/") && !source.path.includes("\0"))
+        .map((source) => posix.normalize(source.path!))
+        .filter((root) => normalizedTarget === root || normalizedTarget.startsWith(root === "/" ? "/" : `${root}/`))
+        .sort((a, b) => b.length - a.length);
+      rootPath = roots[0] ?? rootPath;
+    } catch {
+      // Host ownership is already resolved; an unavailable project list cannot change it.
+    }
+
+    if (rootPath === normalizedTarget && hostId !== undefined) {
+      const ancestors: string[] = [];
+      for (let candidate = rootPath; ; candidate = posix.dirname(candidate)) {
+        ancestors.push(candidate);
+        if (candidate === "/") break;
+      }
+      const markers = ancestors.map((candidate) => posix.join(candidate, ".git"));
+      try {
+        const { existence } = await bb.sdk.hosts.pathsExist({ hostId, paths: markers });
+        rootPath = ancestors.find((candidate) => existence[posix.join(candidate, ".git")]) ?? rootPath;
+      } catch {
+        // Fall back to target directory
+      }
+    }
+
+    const relative = posix.relative(rootPath, normalizedTarget);
+    const directory = relative.length === 0 || relative === "." ? "" : parseRelativePath(relative, { allowEmpty: true }).normalized;
+
+    return {
+      scope: hostId ? { kind: "host", hostId, rootPath } : { kind: "host", rootPath },
+      directory,
+    };
+  }
+
+  let projectList: Awaited<ReturnType<typeof bb.sdk.projects.list>> = [];
+  try {
+    const projects = await bb.sdk.projects.list();
+    projectList = Array.isArray(projects) ? projects : [];
+  } catch {
+    // Relative folders remain usable if project listing is unavailable.
+  }
+
+  const slashIndex = rawDestination.indexOf("/");
+  const projectNameCandidate = slashIndex === -1 ? rawDestination : rawDestination.slice(0, slashIndex);
+  const subfolderCandidate = slashIndex === -1 ? "" : rawDestination.slice(slashIndex + 1);
+  const matches = projectList.filter(
+    (project) =>
+      project.name === rawDestination ||
+      (slashIndex !== -1 && project.name === projectNameCandidate),
+  );
+  if (matches.length > 1) {
+    throw new Error(`Notes destination ${rawDestination} matches multiple projects; use a project ID.`);
+  }
+  const matched = matches[0];
+  if (matched) {
+    const source = matched.sources?.find((candidate) => candidate.isDefault) ?? matched.sources?.[0];
+    if (!source?.path) {
+      throw new Error(`Configured notes project ${matched.name} has no valid directory source.`);
+    }
+    const hostId = rawHostId ?? source.hostId;
+    const rootPath = posix.normalize(source.path);
+    const subfolder = matched.name === projectNameCandidate && slashIndex !== -1 ? subfolderCandidate : "";
+    const directory = subfolder.length > 0
+      ? parseRelativePath(subfolder, { allowEmpty: true }).normalized
+      : "";
+    return {
+      scope: hostId ? { kind: "host", hostId, rootPath } : { kind: "host", rootPath },
+      directory,
+    };
+  }
+
+  const parsed = parseRelativePath(rawDestination, { allowEmpty: false });
+  return {
+    scope: input.currentScope ?? { kind: "host" },
+    directory: parsed.normalized,
+  };
+}
+
+export function createFileService(bb: BbPluginApi, settings?: NotesSettingsHandle) {
   async function target(scope: FileScope) {
     return resolveFileRoot(bb.sdk, scope);
   }
@@ -604,6 +770,71 @@ export function createFileService(bb: BbPluginApi) {
         .map(encodeURIComponent)
         .join("/");
       return { url: `${preview.baseUrl}/${encodedPath}` };
+    },
+
+    async createNote(input: CreateNoteRequest) {
+      const targetDest = await resolveNotesDestination(bb, input, settings);
+      const environment = await target(targetDest.scope);
+
+      if (targetDest.directory.length > 0) {
+        const dirResolved = resolveProjectPath(environment.rootPath, targetDest.directory, {
+          allowEmpty: true,
+        });
+        try {
+          await bb.sdk.files.mkdir({
+            hostId: environment.hostId,
+            rootPath: environment.rootPath,
+            path: dirResolved.absolutePath,
+            recursive: true,
+          });
+        } catch {
+          // Ignore if directory already exists
+        }
+      }
+
+      const MAX_ATTEMPTS = 100;
+      for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+        const fileName = attempt === 0 ? "Untitled.md" : `Untitled ${attempt}.md`;
+        const relativePath =
+          targetDest.directory.length === 0
+            ? fileName
+            : `${targetDest.directory}/${fileName}`;
+        const resolved = resolveProjectPath(environment.rootPath, relativePath, {
+          allowEmpty: false,
+        });
+
+        const result = await bb.sdk.files.write({
+          hostId: environment.hostId,
+          rootPath: environment.rootPath,
+          path: resolved.absolutePath,
+          content: "",
+          contentEncoding: "utf8",
+          expectedSha256: null,
+        });
+
+        if (result.outcome === "written") {
+          fileIndexCache.invalidate(targetDest.scope);
+          return {
+            scope: targetDest.scope,
+            path: resolved.relativePath,
+            name: fileName,
+            absolutePath: resolved.absolutePath,
+            sha256: result.sha256,
+          };
+        }
+
+        if (result.outcome === "conflict") {
+          continue;
+        }
+
+        throw new Error(
+          `Write failed with unexpected outcome: ${(result as { outcome: string }).outcome}`,
+        );
+      }
+
+      throw new Error(
+        `Could not allocate a unique note name after ${MAX_ATTEMPTS} attempts.`,
+      );
     },
   };
 }
